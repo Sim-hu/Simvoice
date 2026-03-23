@@ -1,7 +1,11 @@
 #include "tts/synthesizer.hpp"
+#include "tts/interface.hpp"
 #include "audio/pipeline.hpp"
 
 #include <spdlog/spdlog.h>
+
+#include <algorithm>
+#include <chrono>
 
 namespace tts_bot {
 
@@ -84,32 +88,43 @@ void SynthesizerPool::worker_loop() {
         --pending_;
 
         try {
-            auto cache_key =
-                AudioCache::make_key(req->text, req->style_id);
+            auto cache_key = AudioCache::make_key(
+                req->text, req->style_id, req->speed_scale, req->pitch_scale);
 
             // キャッシュ確認
+            auto t_start = std::chrono::steady_clock::now();
             auto cached = cache_.get(cache_key);
             if (cached) {
-                spdlog::debug("Cache hit for guild {}",
-                              static_cast<uint64_t>(req->guild_id));
+                auto t_end = std::chrono::steady_clock::now();
+                double hit_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+                spdlog::info("Cache hit: {:.2f}ms \"{}\" (guild {})",
+                             hit_ms, req->text.substr(0, 20),
+                             static_cast<uint64_t>(req->guild_id));
                 if (req->on_complete) req->on_complete(*cached);
                 continue;
             }
 
-            // TTS 合成
-            auto wav = engine_.tts(req->text, req->style_id);
-            auto pcm = extract_pcm_from_wav(wav.data(), wav.size());
-            auto stereo = resample_to_48k_stereo(pcm);
+            // TTS 合成 (計測)
+            auto t0 = std::chrono::steady_clock::now();
+            SynthParams params{req->speed_scale, req->pitch_scale};
+            auto stereo = engine_.synthesize(req->text, req->style_id, params);
+            auto t1 = std::chrono::steady_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
-            // キャッシュに保存
+            {
+                std::lock_guard lock(stats_mutex_);
+                synth_times_ms_.push_back(ms);
+                if (ms < min_ms_) min_ms_ = ms;
+                if (ms > max_ms_) max_ms_ = ms;
+            }
+
             cache_.put(cache_key, stereo);
 
-            // コールバックで送信
             if (req->on_complete) req->on_complete(stereo);
 
-            spdlog::debug("TTS synthesized: {} samples for guild {}",
-                          stereo.size(),
-                          static_cast<uint64_t>(req->guild_id));
+            spdlog::info("TTS: {:.0f}ms \"{}\" (guild {})",
+                         ms, req->text.substr(0, 20),
+                         static_cast<uint64_t>(req->guild_id));
         } catch (const std::exception& e) {
             spdlog::error("Worker TTS error: {}", e.what());
         }
@@ -118,6 +133,22 @@ void SynthesizerPool::worker_loop() {
 
 AudioCache::Stats SynthesizerPool::cache_stats() const {
     return cache_.stats();
+}
+
+SynthesizerPool::SynthStats SynthesizerPool::synth_stats() const {
+    std::lock_guard lock(stats_mutex_);
+    SynthStats s;
+    s.total_synths = synth_times_ms_.size();
+    if (s.total_synths == 0) return s;
+
+    s.min_ms = min_ms_;
+    s.max_ms = max_ms_;
+    for (auto v : synth_times_ms_) s.total_ms += v;
+
+    auto sorted = synth_times_ms_;
+    std::sort(sorted.begin(), sorted.end());
+    s.p50_approx = sorted[sorted.size() / 2];
+    return s;
 }
 
 } // namespace tts_bot

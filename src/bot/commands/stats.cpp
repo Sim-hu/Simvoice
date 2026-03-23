@@ -16,14 +16,18 @@ void handle_stats(const dpp::slashcommand_t& event, SynthesizerPool& pool) {
 
     auto ws = event.from()->websocket_ping;
 
+    auto ss = pool.synth_stats();
+    double avg_ms = ss.total_synths > 0 ? ss.total_ms / ss.total_synths : 0;
+
     auto msg = std::format(
         "**Stats:**\n"
         "WebSocket: {:.0f}ms\n"
-        "Cache: {}/{} ({:.1f}%)\n"
-        "Cache entries: {}\n"
-        "Cache memory: {:.1f}MB",
-        ws * 1000.0, cs.hits, total, rate, cs.entries,
-        static_cast<double>(cs.memory_bytes) / (1024.0 * 1024.0));
+        "TTS合成: {} 回, P50: {:.0f}ms, Avg: {:.0f}ms, Min: {:.0f}ms, Max: {:.0f}ms\n"
+        "Cache: {}/{} ({:.1f}%), {:.1f}MB, {} entries",
+        ws * 1000.0,
+        ss.total_synths, ss.p50_approx, avg_ms, ss.min_ms, ss.max_ms,
+        cs.hits, total, rate,
+        static_cast<double>(cs.memory_bytes) / (1024.0 * 1024.0), cs.entries);
 
     event.reply(msg);
 }

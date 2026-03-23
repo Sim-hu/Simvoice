@@ -15,7 +15,8 @@ class AudioCache {
 public:
     explicit AudioCache(size_t max_bytes);
 
-    static size_t make_key(const std::string& text, uint32_t style_id);
+    static size_t make_key(const std::string& text, uint32_t style_id,
+                           float speed = 1.0f, float pitch = 0.0f);
 
     std::optional<std::vector<int16_t>> get(size_t key);
     void put(size_t key, const std::vector<int16_t>& pcm);

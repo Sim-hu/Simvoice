@@ -14,6 +14,8 @@ namespace tts_bot {
 struct TTSRequest {
     std::string text;
     uint32_t style_id;
+    float speed_scale = 1.0f;
+    float pitch_scale = 0.0f;
     dpp::snowflake guild_id;
     std::function<void(const std::vector<int16_t>&)> on_complete;
 };

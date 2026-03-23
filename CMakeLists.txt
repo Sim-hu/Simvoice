@@ -80,3 +80,43 @@ if(ENABLE_VOICEVOX)
     target_include_directories(tts-bot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(tts-bot PRIVATE ${VOICEVOX_CORE_LIB})
 endif()
+
+# --- Tests ---
+
+option(BUILD_TESTS "Build unit tests" ON)
+
+if(BUILD_TESTS)
+    find_package(GTest REQUIRED)
+    if(GTest_FOUND)
+        enable_testing()
+
+        set(TEST_LIBS
+            tts/preprocessor.cpp
+            audio/cache.cpp
+            audio/pipeline.cpp
+            guild/queue.cpp
+            db/database.cpp
+        )
+        list(TRANSFORM TEST_LIBS PREPEND src/)
+
+        add_executable(tts-bot-tests
+            tests/test_preprocessor.cpp
+            tests/test_cache.cpp
+            tests/test_queue.cpp
+            ${TEST_LIBS}
+        )
+
+        target_include_directories(tts-bot-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(tts-bot-tests PRIVATE
+            GTest::gtest_main
+            dpp
+            SQLite::SQLite3
+            spdlog::spdlog
+        )
+
+        include(GoogleTest)
+        gtest_discover_tests(tts-bot-tests)
+    else()
+        message(STATUS "GTest not found, tests disabled. Install libgtest-dev to enable.")
+    endif()
+endif()

@@ -29,6 +29,15 @@ public:
 
     AudioCache::Stats cache_stats() const;
 
+    struct SynthStats {
+        uint64_t total_synths = 0;
+        double total_ms = 0;
+        double min_ms = 1e9;
+        double max_ms = 0;
+        double p50_approx = 0;
+    };
+    SynthStats synth_stats() const;
+
 private:
     void worker_loop();
     std::optional<TTSRequest> take_work();
@@ -48,6 +57,11 @@ private:
 
     std::vector<std::thread> workers_;
     std::atomic<bool> running_{true};
+
+    mutable std::mutex stats_mutex_;
+    std::vector<double> synth_times_ms_;
+    double min_ms_ = 1e9;
+    double max_ms_ = 0;
 };
 
 } // namespace tts_bot

@@ -29,16 +29,23 @@ void handle_message(const dpp::message_create_t& event, dpp::cluster& bot,
 
     // ユーザー別設定 → ギルド設定 → フォールバック
     uint32_t style_id = fallback_style_id;
+    float speed = 1.0f;
+    float pitch = 0.0f;
+
     auto user_sp = db.get_user_speaker(gid, uid);
+    auto gs = db.get_guild_settings(gid);
+
     if (user_sp) {
         style_id = user_sp->speaker_id;
+        speed = static_cast<float>(user_sp->speed_scale);
+        pitch = static_cast<float>(user_sp->pitch_scale);
     } else {
-        auto gs = db.get_guild_settings(gid);
         if (gs.speaker_id > 0) style_id = gs.speaker_id;
+        speed = static_cast<float>(gs.speed_scale);
+        pitch = static_cast<float>(gs.pitch_scale);
     }
 
     auto dict = db.dict_list(gid);
-    auto gs = db.get_guild_settings(gid);
     auto text = preprocessor.process(event.msg.content, dict,
                                      static_cast<size_t>(gs.max_chars));
     if (text.empty()) return;
@@ -48,6 +55,8 @@ void handle_message(const dpp::message_create_t& event, dpp::cluster& bot,
     pool.submit({
         .text = std::move(text),
         .style_id = style_id,
+        .speed_scale = speed,
+        .pitch_scale = pitch,
         .guild_id = guild_id,
         .on_complete =
             [voice_client](const std::vector<int16_t>& stereo) {

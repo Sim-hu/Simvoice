@@ -6,9 +6,12 @@ namespace tts_bot {
 
 AudioCache::AudioCache(size_t max_bytes) : max_bytes_(max_bytes) {}
 
-size_t AudioCache::make_key(const std::string& text, uint32_t style_id) {
+size_t AudioCache::make_key(const std::string& text, uint32_t style_id,
+                            float speed, float pitch) {
     size_t h = std::hash<std::string>{}(text);
     h ^= std::hash<uint32_t>{}(style_id) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash<float>{}(speed) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash<float>{}(pitch) + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
 }
 

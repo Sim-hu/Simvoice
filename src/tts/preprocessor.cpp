@@ -15,6 +15,7 @@ std::string TextPreprocessor::process(const std::string& text,
     result = convert_custom_emoji(result);
     result = strip_unicode_emoji(result);
     if (!dict.empty()) result = apply_dict(result, dict);
+    result = convert_numbers(result);
     result = normalize_whitespace(result);
     result = truncate_utf8(result, max_chars);
     return result;
@@ -109,6 +110,49 @@ std::string TextPreprocessor::strip_unicode_emoji(const std::string& text) {
         i += len;
     }
 
+    return result;
+}
+
+std::string TextPreprocessor::convert_numbers(const std::string& text) {
+    // 連続する数字を漢数字表記に変換 (OpenJTalkが読めるように)
+    // 例: "123" → "百二十三", "42" → "四十二"
+    // 大きい数字はそのまま (OpenJTalkが処理する)
+    // ここでは4桁以下の数字のみ日本語化
+    static const char* digits[] = {
+        "零", "一", "二", "三", "四", "五", "六", "七", "八", "九"};
+
+    auto num_to_kanji = [](int n) -> std::string {
+        if (n == 0) return "零";
+        std::string result;
+        if (n >= 1000) { result += digits[n / 1000]; result += "千"; n %= 1000; }
+        if (n >= 100)  { result += digits[n / 100];  result += "百"; n %= 100; }
+        if (n >= 10) {
+            if (n / 10 > 1) result += digits[n / 10];
+            result += "十";
+            n %= 10;
+        }
+        if (n > 0) result += digits[n];
+        return result;
+    };
+
+    static const std::regex num_re(R"(\d+)");
+    std::string result;
+    std::sregex_iterator it(text.begin(), text.end(), num_re);
+    std::sregex_iterator end;
+    size_t last = 0;
+
+    for (; it != end; ++it) {
+        result += text.substr(last, it->position() - last);
+        auto num_str = it->str();
+        if (num_str.size() <= 4) {
+            int val = std::stoi(num_str);
+            result += num_to_kanji(val);
+        } else {
+            result += num_str; // 5桁以上はそのまま
+        }
+        last = it->position() + it->length();
+    }
+    result += text.substr(last);
     return result;
 }
 

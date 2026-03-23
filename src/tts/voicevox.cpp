@@ -81,12 +81,55 @@ std::vector<uint8_t> VoicevoxEngine::tts(const std::string& text, uint32_t style
     return result;
 }
 
+static std::string modify_audio_query_json(const std::string& json,
+                                            float speed, float pitch) {
+    std::string result = json;
+    auto replace_field = [&](const char* key, float val) {
+        auto pos = result.find(key);
+        if (pos == std::string::npos) return;
+        pos += std::strlen(key);
+        auto end = result.find_first_of(",}", pos);
+        if (end == std::string::npos) return;
+        result.replace(pos, end - pos, std::format("{:.4f}", val));
+    };
+    replace_field("\"speedScale\":", speed);
+    replace_field("\"pitchScale\":", pitch);
+    return result;
+}
+
 std::vector<int16_t> VoicevoxEngine::synthesize(const std::string& text,
                                                  uint32_t speaker_id,
-                                                 const SynthParams&) {
-    auto wav = tts(text, speaker_id);
-    // TODO: SynthParams (speed/pitch) は audio_query 経由で将来対応
-    auto pcm = extract_pcm_from_wav(wav.data(), wav.size());
+                                                 const SynthParams& params) {
+    bool needs_params = (params.speed_scale != 1.0f || params.pitch_scale != 0.0f);
+
+    std::vector<uint8_t> wav_data;
+
+    if (needs_params) {
+        // audio_query → パラメータ書き換え → synthesis
+        char* query_json = nullptr;
+        check(voicevox_synthesizer_create_audio_query(
+                  impl_->synthesizer, text.c_str(), speaker_id, &query_json),
+              "voicevox_synthesizer_create_audio_query");
+
+        std::string json(query_json);
+        voicevox_json_free(query_json);
+
+        json = modify_audio_query_json(json, params.speed_scale, params.pitch_scale);
+
+        auto opts = voicevox_make_default_synthesis_options();
+        uintptr_t wav_length = 0;
+        uint8_t* wav = nullptr;
+        check(voicevox_synthesizer_synthesis(impl_->synthesizer, json.c_str(),
+                                             speaker_id, opts, &wav_length, &wav),
+              "voicevox_synthesizer_synthesis");
+
+        wav_data.assign(wav, wav + wav_length);
+        voicevox_wav_free(wav);
+    } else {
+        wav_data = tts(text, speaker_id);
+    }
+
+    auto pcm = extract_pcm_from_wav(wav_data.data(), wav_data.size());
     return resample_to_48k_stereo(pcm);
 }
 
