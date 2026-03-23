@@ -1,0 +1,9 @@
+.env
+build/
+cmake-build-*/
+.cache/
+compile_commands.json
+*.o
+*.so
+*.a
+CLAUDE.md
