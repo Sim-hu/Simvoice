@@ -28,6 +28,7 @@ public:
     void stop();
 
     AudioCache::Stats cache_stats() const;
+    AudioCache& cache_ref() { return cache_; }
 
     struct SynthStats {
         uint64_t total_synths = 0;

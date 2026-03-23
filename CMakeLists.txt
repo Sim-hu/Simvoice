@@ -62,6 +62,7 @@ add_executable(tts-bot
     src/tts/voicevox.cpp
     src/tts/synthesizer.cpp
     src/tts/preprocessor.cpp
+    src/tts/warmup.cpp
     src/audio/pipeline.cpp
     src/audio/cache.cpp
     src/guild/queue.cpp

@@ -9,6 +9,7 @@ struct Config {
     std::string discord_token;
     std::string open_jtalk_dict_dir;
     std::string model_path;
+    std::string model_dir;  // 全 .vvm を一括ロード
     uint32_t default_style_id = 0;
     uint16_t cpu_num_threads = 0;
 

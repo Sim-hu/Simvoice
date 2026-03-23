@@ -58,6 +58,9 @@ Config Config::from_env() {
     if (const char* v = std::getenv("MODEL_PATH"))
         config.model_path = v;
 
+    if (const char* v = std::getenv("MODEL_DIR"))
+        config.model_dir = v;
+
     if (const char* v = std::getenv("DEFAULT_STYLE_ID"))
         config.default_style_id = static_cast<uint32_t>(std::stoul(v));
 

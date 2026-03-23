@@ -1,6 +1,7 @@
 #include <dpp/dpp.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <csignal>
 #include <thread>
 
@@ -15,6 +16,7 @@
 #include "tts/preprocessor.hpp"
 #include "tts/synthesizer.hpp"
 #include "tts/voicevox.hpp"
+#include "tts/warmup.hpp"
 
 static std::atomic<bool> g_shutdown{false};
 static dpp::cluster* g_bot = nullptr;
@@ -53,6 +55,7 @@ int main() {
 
         std::unique_ptr<tts_bot::VoicevoxEngine> engine;
         std::unique_ptr<tts_bot::SynthesizerPool> pool;
+        std::unique_ptr<tts_bot::CacheWarmer> warmer;
 
         if (!config.open_jtalk_dict_dir.empty() &&
             !config.model_path.empty()) {
@@ -60,12 +63,35 @@ int main() {
                 config.open_jtalk_dict_dir, config.model_path,
                 config.cpu_num_threads);
 
+            // 追加モデルのロード
+            if (!config.model_dir.empty()) {
+                engine->load_models_from_dir(config.model_dir);
+            }
+
             size_t num_workers = std::thread::hardware_concurrency();
             if (num_workers == 0) num_workers = 4;
 
-            size_t cache_64mb = config.cache_mb * 1024 * 1024;
+            size_t cache_bytes = config.cache_mb * 1024 * 1024;
             pool = std::make_unique<tts_bot::SynthesizerPool>(
-                *engine, num_workers, cache_64mb);
+                *engine, num_workers, cache_bytes);
+
+            // キャッシュウォームアップ (バックグラウンド)
+            warmer = std::make_unique<tts_bot::CacheWarmer>(
+                *engine, pool->cache_ref());
+            // デフォルト + よく使われるスタイル ID
+            std::vector<uint32_t> warmup_styles = {
+                config.default_style_id,
+                0, 1, 2, 3, 4, 5, 6, 7, 8,  // 四国めたん・ずんだもん
+                10, 11, 13, 14,               // 春日部つむぎ・波音リツ等
+                20, 21, 23, 24, 26, 27,       // 冥鳴ひまり・九州そら等
+                42, 43, 44, 45, 46, 47,       // 東北ずん子・きりたん・イタコ
+            };
+            // 重複除去
+            std::sort(warmup_styles.begin(), warmup_styles.end());
+            warmup_styles.erase(
+                std::unique(warmup_styles.begin(), warmup_styles.end()),
+                warmup_styles.end());
+            warmer->start(warmup_styles);
         } else {
             spdlog::warn("VOICEVOX not configured. "
                          "Set OPEN_JTALK_DICT_DIR and MODEL_PATH.");
@@ -167,6 +193,7 @@ int main() {
         spdlog::info("Starting bot...");
         bot.start(dpp::st_wait);
 
+        if (warmer) warmer->stop();
         if (pool) pool->stop();
     } catch (const std::exception& e) {
         spdlog::error("Fatal: {}", e.what());

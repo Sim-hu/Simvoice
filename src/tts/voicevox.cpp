@@ -3,6 +3,7 @@
 
 #include <spdlog/spdlog.h>
 #include <stdexcept>
+#include <filesystem>
 
 #ifdef ENABLE_VOICEVOX
 #include "voicevox_core.h"
@@ -81,6 +82,23 @@ std::vector<uint8_t> VoicevoxEngine::tts(const std::string& text, uint32_t style
     return result;
 }
 
+void VoicevoxEngine::load_models_from_dir(const std::string& dir) {
+    for (auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (entry.path().extension() != ".vvm") continue;
+        VoicevoxVoiceModelFile* model = nullptr;
+        auto rc = voicevox_voice_model_file_open(entry.path().c_str(), &model);
+        if (rc != VOICEVOX_RESULT_OK) {
+            spdlog::warn("Failed to open model: {}", entry.path().string());
+            continue;
+        }
+        rc = voicevox_synthesizer_load_voice_model(impl_->synthesizer, model);
+        voicevox_voice_model_file_delete(model);
+        if (rc == VOICEVOX_RESULT_OK) {
+            spdlog::info("VOICEVOX: Loaded {}", entry.path().filename().string());
+        }
+    }
+}
+
 static std::string modify_audio_query_json(const std::string& json,
                                             float speed, float pitch) {
     std::string result = json;
@@ -152,6 +170,8 @@ VoicevoxEngine::~VoicevoxEngine() = default;
 std::vector<uint8_t> VoicevoxEngine::tts(const std::string&, uint32_t) {
     throw std::runtime_error("VOICEVOX not available");
 }
+
+void VoicevoxEngine::load_models_from_dir(const std::string&) {}
 
 std::vector<int16_t> VoicevoxEngine::synthesize(const std::string&, uint32_t, const SynthParams&) {
     throw std::runtime_error("VOICEVOX not available");

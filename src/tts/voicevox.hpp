@@ -20,6 +20,7 @@ public:
     VoicevoxEngine& operator=(const VoicevoxEngine&) = delete;
 
     std::vector<uint8_t> tts(const std::string& text, uint32_t style_id);
+    void load_models_from_dir(const std::string& dir);
     std::vector<int16_t> synthesize(const std::string& text,
                                     uint32_t speaker_id,
                                     const SynthParams& params) override;
