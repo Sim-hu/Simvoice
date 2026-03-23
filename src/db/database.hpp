@@ -14,8 +14,8 @@ struct GuildSettings {
     double speed_scale = 1.0;
     double pitch_scale = 0.0;
     int max_chars = 100;
-    bool read_username = true;
-    bool auto_leave = true;
+    bool read_username = false;
+    bool auto_leave = false;
     bool auto_join = false;
     bool notify_vc_join = false;
     int max_queue = 20;
