@@ -104,6 +104,8 @@ void SynthesizerPool::worker_loop() {
                 continue;
             }
 
+            freq_tracker_.record(req->text, req->style_id);
+
             // TTS 合成 (計測)
             auto t0 = std::chrono::steady_clock::now();
             SynthParams params{req->speed_scale, req->pitch_scale};

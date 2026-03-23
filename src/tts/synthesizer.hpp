@@ -3,6 +3,7 @@
 #include "audio/cache.hpp"
 #include "guild/queue.hpp"
 #include "tts/voicevox.hpp"
+#include "tts/warmup.hpp"
 
 #include <atomic>
 #include <condition_variable>
@@ -29,6 +30,7 @@ public:
 
     AudioCache::Stats cache_stats() const;
     AudioCache& cache_ref() { return cache_; }
+    FrequencyTracker& freq_ref() { return freq_tracker_; }
 
     struct SynthStats {
         uint64_t total_synths = 0;
@@ -63,6 +65,8 @@ private:
     std::vector<double> synth_times_ms_;
     double min_ms_ = 1e9;
     double max_ms_ = 0;
+
+    FrequencyTracker freq_tracker_;
 };
 
 } // namespace tts_bot

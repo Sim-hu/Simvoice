@@ -1,7 +1,10 @@
 #include "tts/warmup.hpp"
+#include "db/database.hpp"
 
 #include <spdlog/spdlog.h>
 #include <chrono>
+#include <algorithm>
+#include <set>
 
 namespace tts_bot {
 
@@ -55,15 +58,39 @@ CacheWarmer::CacheWarmer(VoicevoxEngine& engine, AudioCache& cache)
 
 CacheWarmer::~CacheWarmer() { stop(); }
 
+void CacheWarmer::warm_phrase(const std::string& text, uint32_t style_id,
+                              size_t& done, size_t& errors) {
+    auto key = AudioCache::make_key(text, style_id);
+    if (cache_.get(key)) {
+        ++done;
+        return;
+    }
+    try {
+        SynthParams params{};
+        auto pcm = engine_.synthesize(text, style_id, params);
+        cache_.put(key, pcm);
+        ++done;
+    } catch (...) {
+        ++errors;
+        ++done;
+    }
+}
+
 void CacheWarmer::start(const std::vector<uint32_t>& style_ids) {
     if (running_) return;
     running_ = true;
     thread_ = std::thread(&CacheWarmer::run, this, style_ids);
 }
 
+void CacheWarmer::start_dict(Database& db,
+                              const std::vector<uint32_t>& style_ids) {
+    dict_thread_ = std::thread(&CacheWarmer::run_dict, this, &db, style_ids);
+}
+
 void CacheWarmer::stop() {
     running_ = false;
     if (thread_.joinable()) thread_.join();
+    if (dict_thread_.joinable()) dict_thread_.join();
 }
 
 void CacheWarmer::run(std::vector<uint32_t> style_ids) {
@@ -81,27 +108,12 @@ void CacheWarmer::run(std::vector<uint32_t> style_ids) {
                 spdlog::info("Cache warmup interrupted at {}/{}", done, total);
                 return;
             }
-
-            auto key = AudioCache::make_key(phrase, style_id);
-            if (cache_.get(key)) {
-                ++done;
-                continue; // 既にキャッシュ済み
-            }
-
-            try {
-                SynthParams params{};
-                auto pcm = engine_.synthesize(phrase, style_id, params);
-                cache_.put(key, pcm);
-                ++done;
-            } catch (...) {
-                ++errors;
-                ++done;
-            }
+            warm_phrase(phrase, style_id, done, errors);
 
             if (done % 50 == 0) {
                 auto elapsed = std::chrono::steady_clock::now() - t_start;
                 auto sec = std::chrono::duration<double>(elapsed).count();
-                spdlog::info("Cache warmup: {}/{} ({:.0f}/s, {} errors)",
+                spdlog::info("Cache warmup: {}/{} ({:.1f}/s, {} errors)",
                              done, total, done / sec, errors);
             }
         }
@@ -115,6 +127,76 @@ void CacheWarmer::run(std::vector<uint32_t> style_ids) {
                  done - errors, sec, (done - errors) / sec,
                  static_cast<double>(stats.memory_bytes) / (1024.0 * 1024.0),
                  errors);
+}
+
+void CacheWarmer::run_dict(Database* db, std::vector<uint32_t> style_ids) {
+    // 定型文ウォームアップ完了を待つ
+    if (thread_.joinable()) thread_.join();
+    if (!running_) return;
+
+    // 全ギルドの辞書語を収集
+    // guild_dict から全エントリの reading を取得
+    // (guild_id=0 でワイルドカード的にはできないので、
+    //  DB から全ギルドの辞書を取る必要がある)
+    // 簡易実装: 全ギルドの辞書語を一括取得するクエリを使う
+    auto all_words = db->dict_list_all();
+
+    if (all_words.empty()) {
+        spdlog::info("Dict warmup: no dictionary entries");
+        return;
+    }
+
+    // 重複排除 (同じ reading を複数ギルドが持ってる場合)
+    std::set<std::string> unique_readings;
+    for (auto& entry : all_words) {
+        unique_readings.insert(entry.reading);
+        unique_readings.insert(entry.word);
+    }
+
+    size_t total = unique_readings.size() * style_ids.size();
+    size_t done = 0, errors = 0;
+    auto t_start = std::chrono::steady_clock::now();
+
+    spdlog::info("Dict warmup: {} words x {} styles = {} entries",
+                 unique_readings.size(), style_ids.size(), total);
+
+    for (auto style_id : style_ids) {
+        for (auto& text : unique_readings) {
+            if (!running_) return;
+            warm_phrase(text, style_id, done, errors);
+        }
+    }
+
+    auto sec = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t_start).count();
+    spdlog::info("Dict warmup complete: {} entries in {:.1f}s", done - errors, sec);
+}
+
+// --- FrequencyTracker ---
+
+void FrequencyTracker::record(const std::string& text, uint32_t style_id) {
+    auto key = AudioCache::make_key(text, style_id);
+    std::lock_guard lock(mutex_);
+    ++counts_[key];
+    entries_[key] = {text, style_id};
+}
+
+std::vector<std::pair<std::string, uint32_t>> FrequencyTracker::top(size_t n) const {
+    std::lock_guard lock(mutex_);
+
+    // count 降順でソート
+    std::vector<std::pair<size_t, uint64_t>> sorted(counts_.begin(), counts_.end());
+    std::sort(sorted.begin(), sorted.end(),
+              [](auto& a, auto& b) { return a.second > b.second; });
+
+    std::vector<std::pair<std::string, uint32_t>> result;
+    for (size_t i = 0; i < std::min(n, sorted.size()); ++i) {
+        auto it = entries_.find(sorted[i].first);
+        if (it != entries_.end()) {
+            result.push_back(it->second);
+        }
+    }
+    return result;
 }
 
 } // namespace tts_bot

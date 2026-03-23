@@ -92,6 +92,8 @@ int main() {
                 std::unique(warmup_styles.begin(), warmup_styles.end()),
                 warmup_styles.end());
             warmer->start(warmup_styles);
+            // 定型文ウォームアップ後に辞書語もウォームアップ
+            warmer->start_dict(db, warmup_styles);
         } else {
             spdlog::warn("VOICEVOX not configured. "
                          "Set OPEN_JTALK_DICT_DIR and MODEL_PATH.");

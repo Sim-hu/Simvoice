@@ -184,4 +184,21 @@ std::vector<DictEntry> Database::dict_list(uint64_t guild_id) {
     return entries;
 }
 
+std::vector<DictEntry> Database::dict_list_all() {
+    std::vector<DictEntry> entries;
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_,
+        "SELECT DISTINCT word,reading,priority FROM guild_dict ORDER BY word",
+        -1, &stmt, nullptr);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        entries.push_back({
+            reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)),
+            reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)),
+            sqlite3_column_int(stmt, 2),
+        });
+    }
+    sqlite3_finalize(stmt);
+    return entries;
+}
+
 } // namespace tts_bot

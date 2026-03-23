@@ -29,6 +29,15 @@ void handle_stats(const dpp::slashcommand_t& event, SynthesizerPool& pool) {
         cs.hits, total, rate,
         static_cast<double>(cs.memory_bytes) / (1024.0 * 1024.0), cs.entries);
 
+    auto top = pool.freq_ref().top(5);
+    if (!top.empty()) {
+        msg += "\n**頻出:**";
+        for (auto& [text, sid] : top) {
+            auto display = text.size() > 30 ? text.substr(0, 30) + "..." : text;
+            msg += std::format("\n- \"{}\" (style {})", display, sid);
+        }
+    }
+
     event.reply(msg);
 }
 

@@ -51,6 +51,7 @@ public:
                   const std::string& reading, int priority = 5);
     void dict_remove(uint64_t guild_id, const std::string& word);
     std::vector<DictEntry> dict_list(uint64_t guild_id);
+    std::vector<DictEntry> dict_list_all();
 
 private:
     void run(const char* sql);
