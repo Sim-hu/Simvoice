@@ -1,18 +1,35 @@
 #include "tts/preprocessor.hpp"
+#include "db/database.hpp"
 
 #include <regex>
 
 namespace tts_bot {
 
-std::string TextPreprocessor::process(const std::string& text, size_t max_chars) {
+std::string TextPreprocessor::process(const std::string& text,
+                                      const std::vector<DictEntry>& dict,
+                                      size_t max_chars) {
     auto result = text;
     result = remove_urls(result);
     result = convert_mentions(result);
     result = convert_channel_mentions(result);
     result = convert_custom_emoji(result);
     result = strip_unicode_emoji(result);
+    if (!dict.empty()) result = apply_dict(result, dict);
     result = normalize_whitespace(result);
     result = truncate_utf8(result, max_chars);
+    return result;
+}
+
+std::string TextPreprocessor::apply_dict(const std::string& text,
+                                          const std::vector<DictEntry>& dict) {
+    std::string result = text;
+    for (auto& entry : dict) {
+        size_t pos = 0;
+        while ((pos = result.find(entry.word, pos)) != std::string::npos) {
+            result.replace(pos, entry.word.size(), entry.reading);
+            pos += entry.reading.size();
+        }
+    }
     return result;
 }
 

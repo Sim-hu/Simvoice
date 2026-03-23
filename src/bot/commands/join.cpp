@@ -28,8 +28,8 @@ void handle_join(const dpp::slashcommand_t& event, dpp::cluster& bot,
 
     gsm.set(event.command.guild_id, {event.command.channel_id});
 
-    spdlog::info("Joined VC in guild {}", static_cast<uint64_t>(event.command.guild_id));
-    event.reply("接続しました。このチャンネルのメッセージを読み上げます");
+    spdlog::info("Joining VC in guild {}", static_cast<uint64_t>(event.command.guild_id));
+    event.reply("接続中...");
 }
 
 void handle_leave(const dpp::slashcommand_t& event, GuildStateManager& gsm) {

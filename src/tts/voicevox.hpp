@@ -1,5 +1,7 @@
 #pragma once
 
+#include "tts/interface.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -7,7 +9,7 @@
 
 namespace tts_bot {
 
-class VoicevoxEngine {
+class VoicevoxEngine : public ITtsSynthesizer {
 public:
     VoicevoxEngine(const std::string& open_jtalk_dict_dir,
                    const std::string& model_path,
@@ -17,8 +19,10 @@ public:
     VoicevoxEngine(const VoicevoxEngine&) = delete;
     VoicevoxEngine& operator=(const VoicevoxEngine&) = delete;
 
-    // text → WAV bytes
     std::vector<uint8_t> tts(const std::string& text, uint32_t style_id);
+    std::vector<int16_t> synthesize(const std::string& text,
+                                    uint32_t speaker_id,
+                                    const SynthParams& params) override;
 
 private:
     struct Impl;

@@ -12,6 +12,13 @@ struct Config {
     uint32_t default_style_id = 0;
     uint16_t cpu_num_threads = 0;
 
+    // クラスタリング
+    uint32_t shard_count = 0;    // 0 = 自動
+    uint32_t cluster_id = 0;
+    uint32_t max_clusters = 1;
+
+    size_t cache_mb = 64;
+
     static Config from_env();
 };
 

@@ -1,4 +1,5 @@
 #include "tts/voicevox.hpp"
+#include "audio/pipeline.hpp"
 
 #include <spdlog/spdlog.h>
 #include <stdexcept>
@@ -80,6 +81,15 @@ std::vector<uint8_t> VoicevoxEngine::tts(const std::string& text, uint32_t style
     return result;
 }
 
+std::vector<int16_t> VoicevoxEngine::synthesize(const std::string& text,
+                                                 uint32_t speaker_id,
+                                                 const SynthParams&) {
+    auto wav = tts(text, speaker_id);
+    // TODO: SynthParams (speed/pitch) は audio_query 経由で将来対応
+    auto pcm = extract_pcm_from_wav(wav.data(), wav.size());
+    return resample_to_48k_stereo(pcm);
+}
+
 } // namespace tts_bot
 
 #else // !ENABLE_VOICEVOX
@@ -97,6 +107,10 @@ VoicevoxEngine::VoicevoxEngine(const std::string&, const std::string&, uint16_t)
 VoicevoxEngine::~VoicevoxEngine() = default;
 
 std::vector<uint8_t> VoicevoxEngine::tts(const std::string&, uint32_t) {
+    throw std::runtime_error("VOICEVOX not available");
+}
+
+std::vector<int16_t> VoicevoxEngine::synthesize(const std::string&, uint32_t, const SynthParams&) {
     throw std::runtime_error("VOICEVOX not available");
 }
 

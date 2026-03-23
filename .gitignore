@@ -6,4 +6,7 @@ compile_commands.json
 *.o
 *.so
 *.a
+*.db
+*.db-wal
+*.db-shm
 CLAUDE.md

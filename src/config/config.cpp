@@ -64,6 +64,18 @@ Config Config::from_env() {
     if (const char* v = std::getenv("CPU_NUM_THREADS"))
         config.cpu_num_threads = static_cast<uint16_t>(std::stoul(v));
 
+    if (const char* v = std::getenv("SHARD_COUNT"))
+        config.shard_count = static_cast<uint32_t>(std::stoul(v));
+
+    if (const char* v = std::getenv("CLUSTER_ID"))
+        config.cluster_id = static_cast<uint32_t>(std::stoul(v));
+
+    if (const char* v = std::getenv("MAX_CLUSTERS"))
+        config.max_clusters = static_cast<uint32_t>(std::stoul(v));
+
+    if (const char* v = std::getenv("CACHE_MB"))
+        config.cache_mb = std::stoul(v);
+
     return config;
 }
 

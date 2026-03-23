@@ -54,7 +54,11 @@ add_executable(tts-bot
     src/config/config.cpp
     src/guild/state.cpp
     src/bot/commands/join.cpp
+    src/bot/commands/voice.cpp
+    src/bot/commands/dict.cpp
+    src/bot/commands/stats.cpp
     src/bot/handler.cpp
+    src/db/database.cpp
     src/tts/voicevox.cpp
     src/tts/synthesizer.cpp
     src/tts/preprocessor.cpp
