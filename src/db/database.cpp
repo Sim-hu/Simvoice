@@ -33,13 +33,40 @@ void Database::run(const char* sql) {
 }
 
 void Database::migrate(const std::string& migrations_dir) {
+    run("CREATE TABLE IF NOT EXISTS _migrations ("
+        "name TEXT PRIMARY KEY, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)");
+
+    std::vector<std::filesystem::path> files;
     for (auto& entry : std::filesystem::directory_iterator(migrations_dir)) {
-        if (entry.path().extension() != ".sql") continue;
-        std::ifstream ifs(entry.path());
+        if (entry.path().extension() == ".sql") files.push_back(entry.path());
+    }
+    std::sort(files.begin(), files.end());
+
+    for (auto& path : files) {
+        auto name = path.filename().string();
+
+        sqlite3_stmt* stmt = nullptr;
+        sqlite3_prepare_v2(db_,
+            "SELECT 1 FROM _migrations WHERE name = ?", -1, &stmt, nullptr);
+        sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+        bool applied = sqlite3_step(stmt) == SQLITE_ROW;
+        sqlite3_finalize(stmt);
+
+        if (applied) continue;
+
+        std::ifstream ifs(path);
         std::ostringstream ss;
         ss << ifs.rdbuf();
         run(ss.str().c_str());
-        spdlog::info("Applied migration: {}", entry.path().filename().string());
+
+        stmt = nullptr;
+        sqlite3_prepare_v2(db_,
+            "INSERT INTO _migrations (name) VALUES (?)", -1, &stmt, nullptr);
+        sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        spdlog::info("Applied migration: {}", name);
     }
 }
 
