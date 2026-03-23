@@ -195,6 +195,42 @@ int main() {
                     }
                 }
             }
+
+            // Auto-join: ユーザーが VC に参加 → Bot が未接続なら追従
+            if (gs.auto_join && !state) {
+                auto user_id = event.state.user_id;
+                if (user_id == bot.me.id) return;
+                if (event.state.channel_id.empty()) return; // 退出イベントは無視
+
+                auto* guild = dpp::find_guild(guild_id);
+                if (!guild) return;
+
+                // Bot が既に別の VC に接続中でないことを確認
+                auto* existing_vc = event.from()->get_voice(guild_id);
+                if (existing_vc) return;
+
+                // ユーザーが参加した VC に接続
+                event.from()->connect_voice(guild_id, event.state.channel_id);
+
+                // 読み上げ対象チャンネルはギルドのシステムチャンネルか最初のテキストチャンネル
+                dpp::snowflake text_ch = guild->system_channel_id;
+                if (text_ch.empty()) {
+                    // system_channel がなければギルドの最初のテキストチャンネルを使う
+                    for (auto& ch_id : guild->channels) {
+                        auto* ch = dpp::find_channel(ch_id);
+                        if (ch && ch->is_text_channel()) {
+                            text_ch = ch_id;
+                            break;
+                        }
+                    }
+                }
+
+                if (!text_ch.empty()) {
+                    guild_states.set(guild_id, {text_ch});
+                    spdlog::info("Auto-join: guild {}, VC {}", gid,
+                                 static_cast<uint64_t>(event.state.channel_id));
+                }
+            }
         });
 
         bot.on_slashcommand([&](const dpp::slashcommand_t& event) {
