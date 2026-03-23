@@ -5,10 +5,31 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# --- Sanitizers ---
+
+option(SANITIZE_ADDRESS "Enable AddressSanitizer" OFF)
+option(SANITIZE_THREAD "Enable ThreadSanitizer" OFF)
+
+if(SANITIZE_ADDRESS AND SANITIZE_THREAD)
+    message(FATAL_ERROR "ASan and TSan cannot be used simultaneously")
+endif()
+
+if(SANITIZE_ADDRESS)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address)
+endif()
+
+if(SANITIZE_THREAD)
+    add_compile_options(-fsanitize=thread -g)
+    add_link_options(-fsanitize=thread)
+endif()
+
 # --- Dependencies ---
 
 find_package(SQLite3 REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(OPUS REQUIRED opus)
 
 find_package(dpp QUIET)
 if(NOT dpp_FOUND)
@@ -54,10 +75,18 @@ add_executable(tts-bot
     src/config/config.cpp
     src/guild/state.cpp
     src/bot/commands/join.cpp
+    src/bot/commands/voice.cpp
+    src/bot/commands/dict.cpp
+    src/bot/commands/stats.cpp
+    src/bot/commands/settings.cpp
     src/bot/handler.cpp
+    src/db/database.cpp
     src/tts/voicevox.cpp
     src/tts/synthesizer.cpp
     src/tts/preprocessor.cpp
+    src/tts/warmup.cpp
+    src/tts/sentence_splitter.cpp
+    src/metrics/metrics.cpp
     src/audio/pipeline.cpp
     src/audio/cache.cpp
     src/guild/queue.cpp
@@ -69,10 +98,56 @@ target_link_libraries(tts-bot PRIVATE
     dpp
     SQLite::SQLite3
     spdlog::spdlog
+    ${OPUS_LIBRARIES}
 )
+target_include_directories(tts-bot PRIVATE ${OPUS_INCLUDE_DIRS})
 
 if(ENABLE_VOICEVOX)
     target_compile_definitions(tts-bot PRIVATE ENABLE_VOICEVOX VOICEVOX_LOAD_ONNXRUNTIME)
     target_include_directories(tts-bot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(tts-bot PRIVATE ${VOICEVOX_CORE_LIB})
+endif()
+
+# --- Tests ---
+
+option(BUILD_TESTS "Build unit tests" ON)
+
+if(BUILD_TESTS)
+    find_package(GTest REQUIRED)
+    if(GTest_FOUND)
+        enable_testing()
+
+        set(TEST_LIBS
+            tts/preprocessor.cpp
+            tts/sentence_splitter.cpp
+            audio/cache.cpp
+            audio/pipeline.cpp
+            guild/queue.cpp
+            db/database.cpp
+        )
+        list(TRANSFORM TEST_LIBS PREPEND src/)
+
+        add_executable(tts-bot-tests
+            tests/test_preprocessor.cpp
+            tests/test_cache.cpp
+            tests/test_queue.cpp
+            tests/test_sentence_splitter.cpp
+            ${TEST_LIBS}
+        )
+
+        target_include_directories(tts-bot-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(tts-bot-tests PRIVATE
+            GTest::gtest_main
+            dpp
+            SQLite::SQLite3
+            spdlog::spdlog
+            ${OPUS_LIBRARIES}
+        )
+        target_include_directories(tts-bot-tests PRIVATE ${OPUS_INCLUDE_DIRS})
+
+        include(GoogleTest)
+        gtest_discover_tests(tts-bot-tests)
+    else()
+        message(STATUS "GTest not found, tests disabled. Install libgtest-dev to enable.")
+    endif()
 endif()

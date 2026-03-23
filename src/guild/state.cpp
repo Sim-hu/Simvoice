@@ -19,4 +19,9 @@ std::optional<GuildState> GuildStateManager::get(dpp::snowflake guild_id) const 
     return it->second;
 }
 
+size_t GuildStateManager::size() const {
+    std::lock_guard lock(mutex_);
+    return states_.size();
+}
+
 } // namespace tts_bot

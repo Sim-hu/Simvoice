@@ -1,7 +1,9 @@
 #include "tts/voicevox.hpp"
+#include "audio/pipeline.hpp"
 
 #include <spdlog/spdlog.h>
 #include <stdexcept>
+#include <filesystem>
 
 #ifdef ENABLE_VOICEVOX
 #include "voicevox_core.h"
@@ -80,6 +82,126 @@ std::vector<uint8_t> VoicevoxEngine::tts(const std::string& text, uint32_t style
     return result;
 }
 
+std::vector<VoicevoxEngine::SpeakerInfo> VoicevoxEngine::get_speakers() const {
+    std::vector<SpeakerInfo> result;
+    char* json = voicevox_synthesizer_create_metas_json(impl_->synthesizer);
+    if (!json) return result;
+    std::string metas(json);
+    voicevox_json_free(json);
+
+    size_t pos = 0;
+    while (pos < metas.size()) {
+        auto name_key = metas.find("\"name\"", pos);
+        if (name_key == std::string::npos) break;
+
+        auto name_start = metas.find('"', name_key + 6);
+        if (name_start == std::string::npos) break;
+        ++name_start;
+        auto name_end = metas.find('"', name_start);
+        if (name_end == std::string::npos) break;
+        std::string speaker_name = metas.substr(name_start, name_end - name_start);
+
+        auto styles_key = metas.find("\"styles\"", name_end);
+        if (styles_key == std::string::npos) break;
+        auto styles_end = metas.find(']', styles_key);
+        if (styles_end == std::string::npos) break;
+
+        size_t sp = styles_key;
+        while (sp < styles_end) {
+            auto sname_key = metas.find("\"name\"", sp);
+            if (sname_key == std::string::npos || sname_key > styles_end) break;
+            auto sname_start = metas.find('"', sname_key + 6);
+            if (sname_start == std::string::npos) break;
+            ++sname_start;
+            auto sname_end = metas.find('"', sname_start);
+            if (sname_end == std::string::npos) break;
+            std::string style_name = metas.substr(sname_start, sname_end - sname_start);
+
+            auto id_key = metas.find("\"id\"", sname_end);
+            if (id_key == std::string::npos || id_key > styles_end) break;
+            auto id_start = metas.find_first_of("0123456789", id_key + 4);
+            if (id_start == std::string::npos) break;
+            auto id_end = metas.find_first_not_of("0123456789", id_start);
+            uint32_t style_id = static_cast<uint32_t>(
+                std::stoul(metas.substr(id_start, id_end - id_start)));
+
+            result.push_back({speaker_name, style_name, style_id});
+            sp = id_end;
+        }
+        pos = styles_end + 1;
+    }
+    return result;
+}
+
+void VoicevoxEngine::load_models_from_dir(const std::string& dir) {
+    for (auto& entry : std::filesystem::directory_iterator(dir)) {
+        if (entry.path().extension() != ".vvm") continue;
+        VoicevoxVoiceModelFile* model = nullptr;
+        auto rc = voicevox_voice_model_file_open(entry.path().c_str(), &model);
+        if (rc != VOICEVOX_RESULT_OK) {
+            spdlog::warn("Failed to open model: {}", entry.path().string());
+            continue;
+        }
+        rc = voicevox_synthesizer_load_voice_model(impl_->synthesizer, model);
+        voicevox_voice_model_file_delete(model);
+        if (rc == VOICEVOX_RESULT_OK) {
+            spdlog::info("VOICEVOX: Loaded {}", entry.path().filename().string());
+        }
+    }
+}
+
+static std::string modify_audio_query_json(const std::string& json,
+                                            float speed, float pitch) {
+    std::string result = json;
+    auto replace_field = [&](const char* key, float val) {
+        auto pos = result.find(key);
+        if (pos == std::string::npos) return;
+        pos += std::strlen(key);
+        auto end = result.find_first_of(",}", pos);
+        if (end == std::string::npos) return;
+        result.replace(pos, end - pos, std::format("{:.4f}", val));
+    };
+    replace_field("\"speedScale\":", speed);
+    replace_field("\"pitchScale\":", pitch);
+    return result;
+}
+
+std::vector<int16_t> VoicevoxEngine::synthesize(const std::string& text,
+                                                 uint32_t speaker_id,
+                                                 const SynthParams& params) {
+    bool needs_params = (params.speed_scale != 1.0f || params.pitch_scale != 0.0f);
+
+    std::vector<uint8_t> wav_data;
+
+    if (needs_params) {
+        // audio_query → パラメータ書き換え → synthesis
+        char* query_json = nullptr;
+        check(voicevox_synthesizer_create_audio_query(
+                  impl_->synthesizer, text.c_str(), speaker_id, &query_json),
+              "voicevox_synthesizer_create_audio_query");
+
+        std::string json(query_json);
+        voicevox_json_free(query_json);
+
+        json = modify_audio_query_json(json, params.speed_scale, params.pitch_scale);
+
+        auto opts = voicevox_make_default_synthesis_options();
+        uintptr_t wav_length = 0;
+        uint8_t* wav = nullptr;
+        check(voicevox_synthesizer_synthesis(impl_->synthesizer, json.c_str(),
+                                             speaker_id, opts, &wav_length, &wav),
+              "voicevox_synthesizer_synthesis");
+
+        wav_data.assign(wav, wav + wav_length);
+        voicevox_wav_free(wav);
+    } else {
+        wav_data = tts(text, speaker_id);
+    }
+
+    auto pcm = extract_pcm_from_wav(wav_data.data(), wav_data.size());
+    return resample_to_48k_stereo(pcm);
+}
+
 } // namespace tts_bot
 
 #else // !ENABLE_VOICEVOX
@@ -97,6 +219,13 @@ VoicevoxEngine::VoicevoxEngine(const std::string&, const std::string&, uint16_t)
 VoicevoxEngine::~VoicevoxEngine() = default;
 
 std::vector<uint8_t> VoicevoxEngine::tts(const std::string&, uint32_t) {
+    throw std::runtime_error("VOICEVOX not available");
+}
+
+void VoicevoxEngine::load_models_from_dir(const std::string&) {}
+std::vector<VoicevoxEngine::SpeakerInfo> VoicevoxEngine::get_speakers() const { return {}; }
+
+std::vector<int16_t> VoicevoxEngine::synthesize(const std::string&, uint32_t, const SynthParams&) {
     throw std::runtime_error("VOICEVOX not available");
 }
 

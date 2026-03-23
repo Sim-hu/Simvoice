@@ -15,6 +15,11 @@ bool GuildQueue::try_pop(TTSRequest& out) {
     return true;
 }
 
+void GuildQueue::clear() {
+    std::lock_guard lock(mutex_);
+    queue_.clear();
+}
+
 size_t GuildQueue::size() const {
     std::lock_guard lock(mutex_);
     return queue_.size();
