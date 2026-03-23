@@ -18,6 +18,8 @@ private:
     static std::string apply_dict(const std::string& text,
                                   const std::vector<DictEntry>& dict);
     static std::string convert_numbers(const std::string& text);
+    static std::string remove_spoilers(const std::string& text);
+    static std::string remove_code_blocks(const std::string& text);
     static std::string remove_urls(const std::string& text);
     static std::string convert_mentions(const std::string& text);
     static std::string convert_channel_mentions(const std::string& text);

@@ -110,6 +110,9 @@ VoicevoxResultCode voicevox_voice_model_file_open(
 
 void voicevox_voice_model_file_delete(struct VoicevoxVoiceModelFile *model);
 
+char *voicevox_synthesizer_create_metas_json(
+    const struct VoicevoxSynthesizer *synthesizer);
+
 VoicevoxResultCode voicevox_synthesizer_load_voice_model(
     const struct VoicevoxSynthesizer *synthesizer,
     const struct VoicevoxVoiceModelFile *model);

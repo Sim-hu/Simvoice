@@ -7,6 +7,7 @@
 
 #include "bot/commands/dict.hpp"
 #include "bot/commands/join.hpp"
+#include "bot/commands/settings.hpp"
 #include "bot/commands/stats.hpp"
 #include "bot/commands/voice.hpp"
 #include "bot/handler.hpp"
@@ -111,6 +112,9 @@ int main() {
                 for (auto& c : tts_bot::create_voice_commands(bot.me.id))
                     cmds.push_back(std::move(c));
                 cmds.push_back(tts_bot::create_dict_command(bot.me.id));
+                cmds.push_back(tts_bot::create_settings_command(bot.me.id));
+                cmds.push_back(tts_bot::create_skip_command(bot.me.id));
+                cmds.push_back(tts_bot::create_clear_command(bot.me.id));
                 if (pool)
                     cmds.push_back(tts_bot::create_stats_command(bot.me.id));
 
@@ -130,6 +134,69 @@ int main() {
             spdlog::info("Voice ready in guild {}", static_cast<uint64_t>(guild_id));
         });
 
+        // Auto-leave / Auto-join / VC 通知
+        bot.on_voice_state_update([&](const dpp::voice_state_update_t& event) {
+            auto guild_id = event.state.guild_id;
+            auto gid = static_cast<uint64_t>(guild_id);
+            auto gs = db.get_guild_settings(gid);
+            auto state = guild_states.get(guild_id);
+
+            // VC 参加/退出通知
+            if (gs.notify_vc_join && state && pool) {
+                auto user_id = event.state.user_id;
+                if (user_id == bot.me.id) {} // Bot 自身は無視
+                else if (event.state.channel_id.empty()) {
+                    // 退出
+                    auto* vc = event.from()->get_voice(guild_id);
+                    if (vc && vc->voiceclient && vc->voiceclient->is_ready()) {
+                        auto* g = dpp::find_guild(guild_id);
+                        auto* u = dpp::find_user(user_id);
+                        std::string name = u ? std::string(u->username) : "誰か";
+                        if (g) {
+                            auto m = g->members.find(user_id);
+                            if (m != g->members.end() && !m->second.get_nickname().empty())
+                                name = m->second.get_nickname();
+                        }
+                        pool->submit({
+                            .text = name + "さんが退出しました",
+                            .style_id = gs.speaker_id,
+                            .guild_id = guild_id,
+                            .on_complete = [vc](const std::vector<int16_t>& pcm) {
+                                if (vc->voiceclient)
+                                    vc->voiceclient->send_audio_raw(
+                                        const_cast<uint16_t*>(
+                                            reinterpret_cast<const uint16_t*>(pcm.data())),
+                                        pcm.size() * sizeof(int16_t));
+                            },
+                        });
+                    }
+                }
+            }
+
+            // Auto-leave: Bot のVC に人間が 0 人になったら退出
+            if (gs.auto_leave && state) {
+                auto* vc = event.from()->get_voice(guild_id);
+                if (vc && vc->channel_id) {
+                    auto* ch = dpp::find_channel(vc->channel_id);
+                    if (ch) {
+                        auto voice_members = ch->get_voice_members();
+                        // Bot 以外のメンバーがいるか
+                        bool has_humans = false;
+                        for (auto& [uid, vs] : voice_members) {
+                            if (uid != bot.me.id) { has_humans = true; break; }
+                        }
+                        if (!has_humans) {
+                            spdlog::info("Auto-leave: no humans in VC, guild {}",
+                                         gid);
+                            if (vc->voiceclient) vc->voiceclient->stop_audio();
+                            event.from()->disconnect_voice(guild_id);
+                            guild_states.remove(guild_id);
+                        }
+                    }
+                }
+            }
+        });
+
         bot.on_slashcommand([&](const dpp::slashcommand_t& event) {
             auto name = event.command.get_command_name();
 
@@ -141,19 +208,70 @@ int main() {
             } else if (name == "leave") {
                 tts_bot::handle_leave(event, guild_states);
             } else if (name == "voice") {
-                tts_bot::handle_voice(event, db);
+                // autocomplete で選ばれた場合、話者名を取得
+                std::string label;
+                if (engine) {
+                    auto id = static_cast<uint32_t>(
+                        std::get<int64_t>(event.get_parameter("id")));
+                    for (auto& s : engine->get_speakers()) {
+                        if (s.style_id == id) {
+                            label = s.name + " (" + s.style_name + ")";
+                            break;
+                        }
+                    }
+                }
+                tts_bot::handle_voice(event, db, label);
             } else if (name == "speed") {
                 tts_bot::handle_speed(event, db);
             } else if (name == "pitch") {
                 tts_bot::handle_pitch(event, db);
             } else if (name == "dict") {
                 tts_bot::handle_dict(event, db);
+            } else if (name == "settings") {
+                tts_bot::handle_settings(event, db);
+            } else if (name == "skip") {
+                tts_bot::handle_skip(event);
+            } else if (name == "clear") {
+                auto* vc = event.from()->get_voice(event.command.guild_id);
+                if (vc && vc->voiceclient) {
+                    vc->voiceclient->stop_audio();
+                }
+                // ギルドキューもクリア (TODO: pool にclear APIを追加)
+                event.reply("キューをクリアしました");
             } else if (name == "stats" && pool) {
                 tts_bot::handle_stats(event, *pool);
             }
         });
 
-        bot.on_autocomplete([&bot, &db](const dpp::autocomplete_t& event) {
+        bot.on_autocomplete([&bot, &db, &engine](const dpp::autocomplete_t& event) {
+            if (event.name == "voice" && engine) {
+                std::string input;
+                for (auto& o : event.command.get_command_interaction().options) {
+                    if (o.name == "id" && o.focused) {
+                        if (std::holds_alternative<std::string>(o.value))
+                            input = std::get<std::string>(o.value);
+                        break;
+                    }
+                }
+
+                auto speakers = engine->get_speakers();
+                dpp::interaction_response resp(dpp::ir_autocomplete_reply);
+                int count = 0;
+                for (auto& s : speakers) {
+                    if (count >= 25) break;
+                    auto label = s.name + " (" + s.style_name + ")";
+                    if (!input.empty() && label.find(input) == std::string::npos)
+                        continue;
+                    resp.add_autocomplete_choice(
+                        dpp::command_option_choice(label,
+                            static_cast<int64_t>(s.style_id)));
+                    ++count;
+                }
+                bot.interaction_response_create(event.command.id,
+                                                event.command.token, resp);
+                return;
+            }
+
             if (event.name != "dict") return;
 
             auto subcmd_opts = event.command.get_command_interaction().options;

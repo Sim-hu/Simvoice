@@ -7,7 +7,8 @@ namespace tts_bot {
 
 std::vector<dpp::slashcommand> create_voice_commands(dpp::snowflake app_id) {
     auto voice = dpp::slashcommand("voice", "話者を変更", app_id);
-    voice.add_option(dpp::command_option(dpp::co_integer, "id", "話者ID", true));
+    voice.add_option(dpp::command_option(dpp::co_integer, "id", "話者", true)
+        .set_auto_complete(true));
 
     auto speed = dpp::slashcommand("speed", "読み上げ速度を変更", app_id);
     speed.add_option(dpp::command_option(dpp::co_number, "value", "速度 (0.5〜2.0)", true)
@@ -20,7 +21,8 @@ std::vector<dpp::slashcommand> create_voice_commands(dpp::snowflake app_id) {
     return {voice, speed, pitch};
 }
 
-void handle_voice(const dpp::slashcommand_t& event, Database& db) {
+void handle_voice(const dpp::slashcommand_t& event, Database& db,
+                  const std::string& speaker_label) {
     auto id = static_cast<uint32_t>(
         std::get<int64_t>(event.get_parameter("id")));
     auto gid = static_cast<uint64_t>(event.command.guild_id);
@@ -31,7 +33,11 @@ void handle_voice(const dpp::slashcommand_t& event, Database& db) {
     double pit = existing ? existing->pitch_scale : 0.0;
     db.set_user_speaker(gid, uid, id, spd, pit);
 
-    event.reply(std::format("話者を {} に変更しました", id));
+    if (speaker_label.empty()) {
+        event.reply(std::format("話者を {} に変更しました", id));
+    } else {
+        event.reply(std::format("話者を {} に変更しました", speaker_label));
+    }
 }
 
 void handle_speed(const dpp::slashcommand_t& event, Database& db) {

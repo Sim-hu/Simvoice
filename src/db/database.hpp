@@ -14,6 +14,12 @@ struct GuildSettings {
     double speed_scale = 1.0;
     double pitch_scale = 0.0;
     int max_chars = 100;
+    bool read_username = true;
+    bool auto_leave = true;
+    bool auto_join = false;
+    bool notify_vc_join = false;
+    int max_queue = 20;
+    std::string ignore_prefix = "!,/,(,[";
 };
 
 struct UserSpeaker {
@@ -42,6 +48,10 @@ public:
     void set_guild_speaker(uint64_t guild_id, uint32_t speaker_id);
     void set_guild_speed(uint64_t guild_id, double speed);
     void set_guild_pitch(uint64_t guild_id, double pitch);
+    void set_guild_toggle(uint64_t guild_id, const std::string& field, bool val);
+    void set_guild_int(uint64_t guild_id, const std::string& field, int val);
+    void set_guild_string(uint64_t guild_id, const std::string& field,
+                          const std::string& val);
 
     std::optional<UserSpeaker> get_user_speaker(uint64_t guild_id, uint64_t user_id);
     void set_user_speaker(uint64_t guild_id, uint64_t user_id,

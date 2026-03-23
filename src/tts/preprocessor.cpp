@@ -9,6 +9,8 @@ std::string TextPreprocessor::process(const std::string& text,
                                       const std::vector<DictEntry>& dict,
                                       size_t max_chars) {
     auto result = text;
+    result = remove_code_blocks(result);
+    result = remove_spoilers(result);
     result = remove_urls(result);
     result = convert_mentions(result);
     result = convert_channel_mentions(result);
@@ -111,6 +113,20 @@ std::string TextPreprocessor::strip_unicode_emoji(const std::string& text) {
     }
 
     return result;
+}
+
+std::string TextPreprocessor::remove_spoilers(const std::string& text) {
+    static const std::regex spoiler_re(R"(\|\|[^|]*\|\|)");
+    return std::regex_replace(text, spoiler_re, "");
+}
+
+std::string TextPreprocessor::remove_code_blocks(const std::string& text) {
+    // マルチラインコードブロック
+    static const std::regex block_re(R"(```[\s\S]*?```)");
+    auto result = std::regex_replace(text, block_re, "");
+    // インラインコード
+    static const std::regex inline_re(R"(`[^`]+`)");
+    return std::regex_replace(result, inline_re, "");
 }
 
 std::string TextPreprocessor::convert_numbers(const std::string& text) {

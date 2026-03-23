@@ -21,6 +21,13 @@ public:
 
     std::vector<uint8_t> tts(const std::string& text, uint32_t style_id);
     void load_models_from_dir(const std::string& dir);
+
+    struct SpeakerInfo {
+        std::string name;
+        std::string style_name;
+        uint32_t style_id;
+    };
+    std::vector<SpeakerInfo> get_speakers() const;
     std::vector<int16_t> synthesize(const std::string& text,
                                     uint32_t speaker_id,
                                     const SynthParams& params) override;

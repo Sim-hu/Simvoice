@@ -47,7 +47,8 @@ GuildSettings Database::get_guild_settings(uint64_t guild_id) {
     GuildSettings s;
     sqlite3_stmt* stmt = nullptr;
     sqlite3_prepare_v2(db_,
-        "SELECT speaker_id, speed_scale, pitch_scale, max_chars "
+        "SELECT speaker_id, speed_scale, pitch_scale, max_chars, "
+        "read_username, auto_leave, auto_join, notify_vc_join, max_queue, ignore_prefix "
         "FROM guild_settings WHERE guild_id = ?",
         -1, &stmt, nullptr);
     sqlite3_bind_int64(stmt, 1, static_cast<int64_t>(guild_id));
@@ -56,6 +57,13 @@ GuildSettings Database::get_guild_settings(uint64_t guild_id) {
         s.speed_scale = sqlite3_column_double(stmt, 1);
         s.pitch_scale = sqlite3_column_double(stmt, 2);
         s.max_chars = sqlite3_column_int(stmt, 3);
+        s.read_username = sqlite3_column_int(stmt, 4) != 0;
+        s.auto_leave = sqlite3_column_int(stmt, 5) != 0;
+        s.auto_join = sqlite3_column_int(stmt, 6) != 0;
+        s.notify_vc_join = sqlite3_column_int(stmt, 7) != 0;
+        s.max_queue = sqlite3_column_int(stmt, 8);
+        if (sqlite3_column_text(stmt, 9))
+            s.ignore_prefix = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
     }
     sqlite3_finalize(stmt);
     return s;
@@ -199,6 +207,43 @@ std::vector<DictEntry> Database::dict_list_all() {
     }
     sqlite3_finalize(stmt);
     return entries;
+}
+
+void Database::set_guild_toggle(uint64_t guild_id, const std::string& field, bool val) {
+    auto sql = "INSERT INTO guild_settings (guild_id, " + field + ") VALUES (?, ?) "
+               "ON CONFLICT(guild_id) DO UPDATE SET " + field + "=excluded." + field +
+               ", updated_at=CURRENT_TIMESTAMP";
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    sqlite3_bind_int64(stmt, 1, static_cast<int64_t>(guild_id));
+    sqlite3_bind_int(stmt, 2, val ? 1 : 0);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+void Database::set_guild_int(uint64_t guild_id, const std::string& field, int val) {
+    auto sql = "INSERT INTO guild_settings (guild_id, " + field + ") VALUES (?, ?) "
+               "ON CONFLICT(guild_id) DO UPDATE SET " + field + "=excluded." + field +
+               ", updated_at=CURRENT_TIMESTAMP";
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    sqlite3_bind_int64(stmt, 1, static_cast<int64_t>(guild_id));
+    sqlite3_bind_int(stmt, 2, val);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+void Database::set_guild_string(uint64_t guild_id, const std::string& field,
+                                const std::string& val) {
+    auto sql = "INSERT INTO guild_settings (guild_id, " + field + ") VALUES (?, ?) "
+               "ON CONFLICT(guild_id) DO UPDATE SET " + field + "=excluded." + field +
+               ", updated_at=CURRENT_TIMESTAMP";
+    sqlite3_stmt* stmt = nullptr;
+    sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
+    sqlite3_bind_int64(stmt, 1, static_cast<int64_t>(guild_id));
+    sqlite3_bind_text(stmt, 2, val.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
 }
 
 } // namespace tts_bot
