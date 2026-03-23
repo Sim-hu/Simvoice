@@ -5,6 +5,25 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# --- Sanitizers ---
+
+option(SANITIZE_ADDRESS "Enable AddressSanitizer" OFF)
+option(SANITIZE_THREAD "Enable ThreadSanitizer" OFF)
+
+if(SANITIZE_ADDRESS AND SANITIZE_THREAD)
+    message(FATAL_ERROR "ASan and TSan cannot be used simultaneously")
+endif()
+
+if(SANITIZE_ADDRESS)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address)
+endif()
+
+if(SANITIZE_THREAD)
+    add_compile_options(-fsanitize=thread -g)
+    add_link_options(-fsanitize=thread)
+endif()
+
 # --- Dependencies ---
 
 find_package(SQLite3 REQUIRED)
@@ -66,6 +85,8 @@ add_executable(tts-bot
     src/tts/synthesizer.cpp
     src/tts/preprocessor.cpp
     src/tts/warmup.cpp
+    src/tts/sentence_splitter.cpp
+    src/metrics/metrics.cpp
     src/audio/pipeline.cpp
     src/audio/cache.cpp
     src/guild/queue.cpp
@@ -98,6 +119,7 @@ if(BUILD_TESTS)
 
         set(TEST_LIBS
             tts/preprocessor.cpp
+            tts/sentence_splitter.cpp
             audio/cache.cpp
             audio/pipeline.cpp
             guild/queue.cpp
@@ -109,6 +131,7 @@ if(BUILD_TESTS)
             tests/test_preprocessor.cpp
             tests/test_cache.cpp
             tests/test_queue.cpp
+            tests/test_sentence_splitter.cpp
             ${TEST_LIBS}
         )
 

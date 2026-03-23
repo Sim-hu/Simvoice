@@ -1,11 +1,13 @@
 #include "tts/synthesizer.hpp"
 #include "tts/interface.hpp"
+#include "tts/sentence_splitter.hpp"
 #include "audio/pipeline.hpp"
 
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <chrono>
+#include <future>
 
 namespace tts_bot {
 
@@ -94,49 +96,75 @@ void SynthesizerPool::worker_loop() {
 
         --pending_;
 
+        auto t_total_start = std::chrono::steady_clock::now();
+
         try {
-            auto cache_key = AudioCache::make_key(
-                req->text, req->style_id, req->speed_scale, req->pitch_scale);
+            // ストリーミング合成: 文を分割して逐次送信
+            auto sentences = split_sentences(req->text);
 
-            // キャッシュ確認 (Opus フレーム)
-            auto t_start = std::chrono::steady_clock::now();
-            auto cached = cache_.get(cache_key);
-            if (cached) {
-                auto t_end = std::chrono::steady_clock::now();
-                double hit_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-                spdlog::info("Cache hit (opus): {:.2f}ms \"{}\" (guild {})",
-                             hit_ms, req->text.substr(0, 20),
+            for (auto& sentence : sentences) {
+                if (!running_) break;
+
+                auto cache_key = AudioCache::make_key(
+                    sentence, req->style_id, req->speed_scale, req->pitch_scale);
+
+                // キャッシュ確認
+                auto cached = cache_.get(cache_key);
+                if (cached) {
+                    spdlog::debug("Cache hit (opus): \"{}\"",
+                                  sentence.substr(0, 20));
+                    if (req->on_complete) req->on_complete(*cached);
+                    continue;
+                }
+
+                freq_tracker_.record(sentence, req->style_id);
+
+                // タイムアウト付き合成
+                auto t0 = std::chrono::steady_clock::now();
+                SynthParams params{req->speed_scale, req->pitch_scale};
+
+                auto future = std::async(std::launch::async, [&]() {
+                    return engine_.synthesize(sentence, req->style_id, params);
+                });
+
+                if (future.wait_for(synth_timeout_) ==
+                    std::future_status::timeout) {
+                    spdlog::error("TTS timeout ({}s): \"{}\"",
+                                  synth_timeout_.count(),
+                                  sentence.substr(0, 30));
+                    ++timeout_count_;
+                    future.wait(); // リーク防止: 完了を待つ (バックグラウンド)
+                    continue;
+                }
+
+                auto stereo = future.get();
+                auto opus = encode_opus(stereo);
+                auto t1 = std::chrono::steady_clock::now();
+                double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+                {
+                    std::lock_guard lock(stats_mutex_);
+                    synth_times_ms_.push_back(ms);
+                    if (ms < min_ms_) min_ms_ = ms;
+                    if (ms > max_ms_) max_ms_ = ms;
+                }
+
+                if (on_synth_) on_synth_(ms);
+
+                cache_.put(cache_key, opus);
+
+                if (req->on_complete) req->on_complete(opus);
+
+                spdlog::info("TTS: {:.0f}ms \"{}\" ({} frames, guild {})",
+                             ms, sentence.substr(0, 20), opus.frames.size(),
                              static_cast<uint64_t>(req->guild_id));
-                if (req->on_complete) req->on_complete(*cached);
-                continue;
             }
-
-            freq_tracker_.record(req->text, req->style_id);
-
-            // TTS 合成 → PCM → Opus エンコード
-            auto t0 = std::chrono::steady_clock::now();
-            SynthParams params{req->speed_scale, req->pitch_scale};
-            auto stereo = engine_.synthesize(req->text, req->style_id, params);
-            auto opus = encode_opus(stereo);
-            auto t1 = std::chrono::steady_clock::now();
-            double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-            {
-                std::lock_guard lock(stats_mutex_);
-                synth_times_ms_.push_back(ms);
-                if (ms < min_ms_) min_ms_ = ms;
-                if (ms > max_ms_) max_ms_ = ms;
-            }
-
-            cache_.put(cache_key, opus);
-
-            if (req->on_complete) req->on_complete(opus);
-
-            spdlog::info("TTS: {:.0f}ms \"{}\" ({} opus frames, guild {})",
-                         ms, req->text.substr(0, 20), opus.frames.size(),
-                         static_cast<uint64_t>(req->guild_id));
         } catch (const std::exception& e) {
             spdlog::error("Worker TTS error: {}", e.what());
+            ++error_count_;
+        } catch (...) {
+            spdlog::error("Worker TTS unknown error");
+            ++error_count_;
         }
     }
 }

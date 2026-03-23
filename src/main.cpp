@@ -7,6 +7,7 @@
 
 #include "audio/pipeline.hpp"
 #include "bot/commands/dict.hpp"
+#include "metrics/metrics.hpp"
 #include "bot/commands/join.hpp"
 #include "bot/commands/settings.hpp"
 #include "bot/commands/stats.hpp"
@@ -58,6 +59,7 @@ int main() {
         std::unique_ptr<tts_bot::VoicevoxEngine> engine;
         std::unique_ptr<tts_bot::SynthesizerPool> pool;
         std::unique_ptr<tts_bot::CacheWarmer> warmer;
+        std::unique_ptr<tts_bot::MetricsServer> metrics;
 
         if (!config.open_jtalk_dict_dir.empty() &&
             !config.model_path.empty()) {
@@ -93,8 +95,21 @@ int main() {
             warmup_styles.erase(
                 std::unique(warmup_styles.begin(), warmup_styles.end()),
                 warmup_styles.end());
+            pool->set_synth_timeout(
+                std::chrono::seconds(config.synth_timeout_sec));
+
+            // Prometheus メトリクス
+            if (config.metrics_port > 0) {
+                metrics = std::make_unique<tts_bot::MetricsServer>(
+                    config.metrics_port, *pool,
+                    [&guild_states]() { return guild_states.size(); });
+                pool->set_on_synth([&metrics](double ms) {
+                    if (metrics) metrics->record_synth_ms(ms);
+                });
+                metrics->start();
+            }
+
             warmer->start(warmup_styles);
-            // 定型文ウォームアップ後に辞書語もウォームアップ
             warmer->start_dict(db, warmup_styles);
         } else {
             spdlog::warn("VOICEVOX not configured. "
@@ -352,6 +367,7 @@ int main() {
         spdlog::info("Starting bot...");
         bot.start(dpp::st_wait);
 
+        if (metrics) metrics->stop();
         if (warmer) warmer->stop();
         if (pool) pool->stop();
     } catch (const std::exception& e) {

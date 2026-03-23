@@ -19,6 +19,8 @@ struct Config {
     uint32_t max_clusters = 1;
 
     size_t cache_mb = 64;
+    uint16_t metrics_port = 0; // 0 = 無効
+    uint32_t synth_timeout_sec = 30;
 
     static Config from_env();
 };

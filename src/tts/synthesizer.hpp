@@ -6,7 +6,9 @@
 #include "tts/warmup.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -29,6 +31,9 @@ public:
     void stop();
     void clear_guild(dpp::snowflake guild_id);
 
+    void set_synth_timeout(std::chrono::seconds t) { synth_timeout_ = t; }
+    void set_on_synth(std::function<void(double)> fn) { on_synth_ = std::move(fn); }
+
     AudioCache::Stats cache_stats() const;
     AudioCache& cache_ref() { return cache_; }
     FrequencyTracker& freq_ref() { return freq_tracker_; }
@@ -42,6 +47,9 @@ public:
     };
     SynthStats synth_stats() const;
 
+    uint64_t error_count() const { return error_count_.load(); }
+    uint64_t timeout_count() const { return timeout_count_.load(); }
+
 private:
     void worker_loop();
     std::optional<TTSRequest> take_work();
@@ -49,9 +57,8 @@ private:
     VoicevoxEngine& engine_;
     AudioCache cache_;
 
-    // ギルド別キュー (ラウンドロビンで公平にスケジューリング)
     std::unordered_map<uint64_t, std::unique_ptr<GuildQueue>> guilds_;
-    std::vector<uint64_t> guild_order_; // ラウンドロビン用
+    std::vector<uint64_t> guild_order_;
     std::shared_mutex guilds_mutex_;
     size_t rr_index_ = 0;
 
@@ -68,6 +75,10 @@ private:
     double max_ms_ = 0;
 
     FrequencyTracker freq_tracker_;
+    std::chrono::seconds synth_timeout_{30};
+    std::atomic<uint64_t> error_count_{0};
+    std::atomic<uint64_t> timeout_count_{0};
+    std::function<void(double)> on_synth_;
 };
 
 } // namespace tts_bot

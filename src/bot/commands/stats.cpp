@@ -23,11 +23,13 @@ void handle_stats(const dpp::slashcommand_t& event, SynthesizerPool& pool) {
         "**Stats:**\n"
         "WebSocket: {:.0f}ms\n"
         "TTS合成: {} 回, P50: {:.0f}ms, Avg: {:.0f}ms, Min: {:.0f}ms, Max: {:.0f}ms\n"
-        "Cache: {}/{} ({:.1f}%), {:.1f}MB, {} entries",
+        "Cache: {}/{} ({:.1f}%), {:.1f}MB, {} entries\n"
+        "Errors: {}, Timeouts: {}",
         ws * 1000.0,
         ss.total_synths, ss.p50_approx, avg_ms, ss.min_ms, ss.max_ms,
         cs.hits, total, rate,
-        static_cast<double>(cs.memory_bytes) / (1024.0 * 1024.0), cs.entries);
+        static_cast<double>(cs.memory_bytes) / (1024.0 * 1024.0), cs.entries,
+        pool.error_count(), pool.timeout_count());
 
     auto top = pool.freq_ref().top(5);
     if (!top.empty()) {

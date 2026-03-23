@@ -17,6 +17,7 @@ public:
     void set(dpp::snowflake guild_id, GuildState state);
     void remove(dpp::snowflake guild_id);
     std::optional<GuildState> get(dpp::snowflake guild_id) const;
+    size_t size() const;
 
 private:
     mutable std::mutex mutex_;

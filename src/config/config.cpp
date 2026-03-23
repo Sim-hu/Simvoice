@@ -79,6 +79,12 @@ Config Config::from_env() {
     if (const char* v = std::getenv("CACHE_MB"))
         config.cache_mb = std::stoul(v);
 
+    if (const char* v = std::getenv("METRICS_PORT"))
+        config.metrics_port = static_cast<uint16_t>(std::stoul(v));
+
+    if (const char* v = std::getenv("SYNTH_TIMEOUT"))
+        config.synth_timeout_sec = static_cast<uint32_t>(std::stoul(v));
+
     return config;
 }
 
