@@ -1,5 +1,7 @@
 #pragma once
 
+#include "audio/pipeline.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <list>
@@ -18,8 +20,8 @@ public:
     static size_t make_key(const std::string& text, uint32_t style_id,
                            float speed = 1.0f, float pitch = 0.0f);
 
-    std::optional<std::vector<int16_t>> get(size_t key);
-    void put(size_t key, const std::vector<int16_t>& pcm);
+    std::optional<OpusFrames> get(size_t key);
+    void put(size_t key, const OpusFrames& frames);
 
     struct Stats {
         uint64_t hits = 0;
@@ -31,7 +33,7 @@ public:
 
 private:
     struct Entry {
-        std::vector<int16_t> pcm;
+        OpusFrames frames;
         std::list<size_t>::iterator lru_it;
     };
 

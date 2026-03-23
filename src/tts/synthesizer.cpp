@@ -47,12 +47,20 @@ void SynthesizerPool::submit(TTSRequest req) {
     notify_cv_.notify_one();
 }
 
+void SynthesizerPool::clear_guild(dpp::snowflake guild_id) {
+    auto gid = static_cast<uint64_t>(guild_id);
+    std::shared_lock lock(guilds_mutex_);
+    auto it = guilds_.find(gid);
+    if (it != guilds_.end()) {
+        it->second->clear();
+    }
+}
+
 std::optional<TTSRequest> SynthesizerPool::take_work() {
     std::unique_lock lock(guilds_mutex_);
 
     if (guild_order_.empty()) return std::nullopt;
 
-    // ラウンドロビンで各ギルドを巡回
     size_t start = rr_index_;
     do {
         auto gid = guild_order_[rr_index_];
@@ -72,7 +80,6 @@ std::optional<TTSRequest> SynthesizerPool::take_work() {
 
 void SynthesizerPool::worker_loop() {
     while (running_) {
-        // 仕事があるまで待機
         {
             std::unique_lock lock(notify_mutex_);
             notify_cv_.wait(lock, [this] {
@@ -91,13 +98,13 @@ void SynthesizerPool::worker_loop() {
             auto cache_key = AudioCache::make_key(
                 req->text, req->style_id, req->speed_scale, req->pitch_scale);
 
-            // キャッシュ確認
+            // キャッシュ確認 (Opus フレーム)
             auto t_start = std::chrono::steady_clock::now();
             auto cached = cache_.get(cache_key);
             if (cached) {
                 auto t_end = std::chrono::steady_clock::now();
                 double hit_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
-                spdlog::info("Cache hit: {:.2f}ms \"{}\" (guild {})",
+                spdlog::info("Cache hit (opus): {:.2f}ms \"{}\" (guild {})",
                              hit_ms, req->text.substr(0, 20),
                              static_cast<uint64_t>(req->guild_id));
                 if (req->on_complete) req->on_complete(*cached);
@@ -106,10 +113,11 @@ void SynthesizerPool::worker_loop() {
 
             freq_tracker_.record(req->text, req->style_id);
 
-            // TTS 合成 (計測)
+            // TTS 合成 → PCM → Opus エンコード
             auto t0 = std::chrono::steady_clock::now();
             SynthParams params{req->speed_scale, req->pitch_scale};
             auto stereo = engine_.synthesize(req->text, req->style_id, params);
+            auto opus = encode_opus(stereo);
             auto t1 = std::chrono::steady_clock::now();
             double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 
@@ -120,12 +128,12 @@ void SynthesizerPool::worker_loop() {
                 if (ms > max_ms_) max_ms_ = ms;
             }
 
-            cache_.put(cache_key, stereo);
+            cache_.put(cache_key, opus);
 
-            if (req->on_complete) req->on_complete(stereo);
+            if (req->on_complete) req->on_complete(opus);
 
-            spdlog::info("TTS: {:.0f}ms \"{}\" (guild {})",
-                         ms, req->text.substr(0, 20),
+            spdlog::info("TTS: {:.0f}ms \"{}\" ({} opus frames, guild {})",
+                         ms, req->text.substr(0, 20), opus.frames.size(),
                          static_cast<uint64_t>(req->guild_id));
         } catch (const std::exception& e) {
             spdlog::error("Worker TTS error: {}", e.what());

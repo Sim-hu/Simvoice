@@ -1,4 +1,5 @@
 #include "bot/handler.hpp"
+#include "audio/pipeline.hpp"
 #include "db/database.hpp"
 #include "guild/queue.hpp"
 #include "guild/state.hpp"
@@ -6,13 +7,15 @@
 #include "tts/synthesizer.hpp"
 
 #include <spdlog/spdlog.h>
+#include <chrono>
+#include <mutex>
+#include <unordered_map>
 
 namespace tts_bot {
 
 static bool starts_with_prefix(const std::string& text,
                                const std::string& prefixes) {
     if (text.empty() || prefixes.empty()) return false;
-    // カンマ区切りのプレフィックスをチェック
     size_t start = 0;
     while (start < prefixes.size()) {
         auto end = prefixes.find(',', start);
@@ -22,6 +25,23 @@ static bool starts_with_prefix(const std::string& text,
         start = end + 1;
     }
     return false;
+}
+
+// レートリミット: ユーザー単位で 1 秒に 1 メッセージ
+static std::mutex rate_mutex;
+static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point> last_msg;
+
+static bool check_rate_limit(uint64_t user_id) {
+    std::lock_guard lock(rate_mutex);
+    auto now = std::chrono::steady_clock::now();
+    auto it = last_msg.find(user_id);
+    if (it != last_msg.end()) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - it->second).count();
+        if (elapsed < 1000) return false;
+    }
+    last_msg[user_id] = now;
+    return true;
 }
 
 void handle_message(const dpp::message_create_t& event, dpp::cluster& bot,
@@ -42,14 +62,15 @@ void handle_message(const dpp::message_create_t& event, dpp::cluster& bot,
     auto uid = static_cast<uint64_t>(event.msg.author.id);
     auto gs = db.get_guild_settings(gid);
 
+    // レートリミット
+    if (!check_rate_limit(uid)) return;
+
     // プレフィックス無視
     if (starts_with_prefix(event.msg.content, gs.ignore_prefix)) return;
 
     // テキスト組み立て
     std::string raw_text;
-
     if (event.msg.content.empty() && !event.msg.attachments.empty()) {
-        // 添付ファイルのみ
         raw_text = "添付ファイル";
     } else {
         raw_text = event.msg.content;
@@ -57,7 +78,6 @@ void handle_message(const dpp::message_create_t& event, dpp::cluster& bot,
             raw_text += " 添付ファイル";
         }
     }
-
     if (raw_text.empty()) return;
 
     auto dict = db.dict_list(gid);
@@ -65,7 +85,6 @@ void handle_message(const dpp::message_create_t& event, dpp::cluster& bot,
                                      static_cast<size_t>(gs.max_chars));
     if (text.empty()) return;
 
-    // 名前読み上げ
     if (gs.read_username) {
         auto username = event.msg.member.get_nickname();
         if (username.empty()) username = event.msg.author.global_name;
@@ -73,7 +92,6 @@ void handle_message(const dpp::message_create_t& event, dpp::cluster& bot,
         text = username + "、" + text;
     }
 
-    // ユーザー別設定
     uint32_t style_id = fallback_style_id;
     float speed = 1.0f;
     float pitch = 0.0f;
@@ -98,11 +116,11 @@ void handle_message(const dpp::message_create_t& event, dpp::cluster& bot,
         .pitch_scale = pitch,
         .guild_id = guild_id,
         .on_complete =
-            [voice_client](const std::vector<int16_t>& stereo) {
-                voice_client->send_audio_raw(
-                    const_cast<uint16_t*>(
-                        reinterpret_cast<const uint16_t*>(stereo.data())),
-                    stereo.size() * sizeof(int16_t));
+            [voice_client](const OpusFrames& opus) {
+                for (auto& frame : opus.frames) {
+                    voice_client->send_audio_opus(
+                        const_cast<uint8_t*>(frame.data()), frame.size());
+                }
             },
     });
 }

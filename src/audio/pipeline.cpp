@@ -1,5 +1,6 @@
 #include "audio/pipeline.hpp"
 
+#include <opus/opus.h>
 #include <cstring>
 #include <stdexcept>
 
@@ -47,6 +48,37 @@ std::vector<int16_t> resample_to_48k_stereo(const std::vector<int16_t>& mono_24k
     }
 
     return stereo_48k;
+}
+
+OpusFrames encode_opus(const std::vector<int16_t>& pcm_48k_stereo) {
+    constexpr int SAMPLE_RATE = 48000;
+    constexpr int CHANNELS = 2;
+    constexpr int FRAME_SAMPLES = 2880; // 60ms per channel
+    constexpr int FRAME_SIZE = FRAME_SAMPLES * CHANNELS;
+    constexpr int MAX_PACKET = 4000;
+
+    int err;
+    OpusEncoder* enc = opus_encoder_create(SAMPLE_RATE, CHANNELS,
+                                           OPUS_APPLICATION_VOIP, &err);
+    if (err != OPUS_OK || !enc) {
+        throw std::runtime_error("opus_encoder_create failed");
+    }
+    opus_encoder_ctl(enc, OPUS_SET_BITRATE(64000));
+
+    OpusFrames result;
+    std::vector<uint8_t> packet(MAX_PACKET);
+
+    for (size_t i = 0; i + FRAME_SIZE <= pcm_48k_stereo.size(); i += FRAME_SIZE) {
+        int len = opus_encode(enc, pcm_48k_stereo.data() + i,
+                              FRAME_SAMPLES, packet.data(), MAX_PACKET);
+        if (len > 0) {
+            result.frames.emplace_back(packet.begin(), packet.begin() + len);
+            result.total_bytes += len;
+        }
+    }
+
+    opus_encoder_destroy(enc);
+    return result;
 }
 
 } // namespace tts_bot

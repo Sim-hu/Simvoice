@@ -9,6 +9,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(SQLite3 REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(OPUS REQUIRED opus)
 
 find_package(dpp QUIET)
 if(NOT dpp_FOUND)
@@ -75,7 +77,9 @@ target_link_libraries(tts-bot PRIVATE
     dpp
     SQLite::SQLite3
     spdlog::spdlog
+    ${OPUS_LIBRARIES}
 )
+target_include_directories(tts-bot PRIVATE ${OPUS_INCLUDE_DIRS})
 
 if(ENABLE_VOICEVOX)
     target_compile_definitions(tts-bot PRIVATE ENABLE_VOICEVOX VOICEVOX_LOAD_ONNXRUNTIME)
@@ -114,7 +118,9 @@ if(BUILD_TESTS)
             dpp
             SQLite::SQLite3
             spdlog::spdlog
+            ${OPUS_LIBRARIES}
         )
+        target_include_directories(tts-bot-tests PRIVATE ${OPUS_INCLUDE_DIRS})
 
         include(GoogleTest)
         gtest_discover_tests(tts-bot-tests)

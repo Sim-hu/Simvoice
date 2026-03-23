@@ -11,19 +11,22 @@
 
 namespace tts_bot {
 
+struct OpusFrames;
+
 struct TTSRequest {
     std::string text;
     uint32_t style_id;
     float speed_scale = 1.0f;
     float pitch_scale = 0.0f;
     dpp::snowflake guild_id;
-    std::function<void(const std::vector<int16_t>&)> on_complete;
+    std::function<void(const OpusFrames&)> on_complete;
 };
 
 class GuildQueue {
 public:
     void push(TTSRequest req);
     bool try_pop(TTSRequest& out);
+    void clear();
     size_t size() const;
     bool empty() const;
 

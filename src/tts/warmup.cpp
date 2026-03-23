@@ -68,7 +68,8 @@ void CacheWarmer::warm_phrase(const std::string& text, uint32_t style_id,
     try {
         SynthParams params{};
         auto pcm = engine_.synthesize(text, style_id, params);
-        cache_.put(key, pcm);
+        auto opus = encode_opus(pcm);
+        cache_.put(key, opus);
         ++done;
     } catch (...) {
         ++errors;

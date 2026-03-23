@@ -2,6 +2,16 @@
 #include "audio/cache.hpp"
 
 using tts_bot::AudioCache;
+using tts_bot::OpusFrames;
+
+static OpusFrames make_frames(size_t n, size_t frame_size = 10) {
+    OpusFrames f;
+    for (size_t i = 0; i < n; ++i) {
+        f.frames.emplace_back(frame_size, static_cast<uint8_t>(i));
+        f.total_bytes += frame_size;
+    }
+    return f;
+}
 
 TEST(CacheTest, MissOnEmpty) {
     AudioCache cache(1024);
@@ -15,14 +25,14 @@ TEST(CacheTest, MissOnEmpty) {
 
 TEST(CacheTest, HitAfterPut) {
     AudioCache cache(1024 * 1024);
-    std::vector<int16_t> pcm = {1, 2, 3, 4};
+    auto frames = make_frames(5);
     auto key = AudioCache::make_key("hello", 0);
 
-    cache.put(key, pcm);
+    cache.put(key, frames);
     auto result = cache.get(key);
 
     EXPECT_TRUE(result.has_value());
-    EXPECT_EQ(*result, pcm);
+    EXPECT_EQ(result->frames.size(), 5);
 
     auto stats = cache.stats();
     EXPECT_EQ(stats.hits, 1);
@@ -30,14 +40,14 @@ TEST(CacheTest, HitAfterPut) {
 }
 
 TEST(CacheTest, EvictsOldEntries) {
-    AudioCache cache(32); // 32 bytes = 16 samples
-    std::vector<int16_t> pcm1(8, 1); // 16 bytes
-    std::vector<int16_t> pcm2(8, 2); // 16 bytes
-    std::vector<int16_t> pcm3(8, 3); // 16 bytes
+    AudioCache cache(25); // 25 bytes
+    auto f1 = make_frames(1, 10); // 10 bytes
+    auto f2 = make_frames(1, 10);
+    auto f3 = make_frames(1, 10);
 
-    cache.put(1, pcm1);
-    cache.put(2, pcm2);
-    cache.put(3, pcm3); // should evict pcm1
+    cache.put(1, f1);
+    cache.put(2, f2);
+    cache.put(3, f3); // evicts f1
 
     EXPECT_FALSE(cache.get(1).has_value());
     EXPECT_TRUE(cache.get(2).has_value());
@@ -45,13 +55,13 @@ TEST(CacheTest, EvictsOldEntries) {
 }
 
 TEST(CacheTest, LruOrderRespected) {
-    AudioCache cache(32);
-    std::vector<int16_t> pcm(8, 0);
+    AudioCache cache(25);
+    auto f = make_frames(1, 10);
 
-    cache.put(1, pcm);
-    cache.put(2, pcm);
-    cache.get(1); // touch key 1, making key 2 the LRU
-    cache.put(3, pcm); // should evict key 2
+    cache.put(1, f);
+    cache.put(2, f);
+    cache.get(1); // touch key 1
+    cache.put(3, f); // evicts key 2
 
     EXPECT_TRUE(cache.get(1).has_value());
     EXPECT_FALSE(cache.get(2).has_value());
@@ -69,7 +79,7 @@ TEST(CacheTest, DifferentSpeedPitchKeys) {
 
 TEST(CacheTest, RejectsOversizedEntry) {
     AudioCache cache(16);
-    std::vector<int16_t> big(100, 0); // 200 bytes > 16
+    auto big = make_frames(10, 100); // 1000 bytes > 16
     cache.put(1, big);
 
     EXPECT_FALSE(cache.get(1).has_value());

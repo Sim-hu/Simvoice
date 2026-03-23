@@ -27,6 +27,7 @@ public:
 
     void submit(TTSRequest req);
     void stop();
+    void clear_guild(dpp::snowflake guild_id);
 
     AudioCache::Stats cache_stats() const;
     AudioCache& cache_ref() { return cache_; }

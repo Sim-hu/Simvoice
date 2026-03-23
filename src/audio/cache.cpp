@@ -15,7 +15,7 @@ size_t AudioCache::make_key(const std::string& text, uint32_t style_id,
     return h;
 }
 
-std::optional<std::vector<int16_t>> AudioCache::get(size_t key) {
+std::optional<OpusFrames> AudioCache::get(size_t key) {
     std::lock_guard lock(mutex_);
 
     auto it = map_.find(key);
@@ -29,22 +29,20 @@ std::optional<std::vector<int16_t>> AudioCache::get(size_t key) {
     lru_.push_front(key);
     it->second.lru_it = lru_.begin();
 
-    return it->second.pcm;
+    return it->second.frames;
 }
 
-void AudioCache::put(size_t key, const std::vector<int16_t>& pcm) {
+void AudioCache::put(size_t key, const OpusFrames& frames) {
     std::lock_guard lock(mutex_);
 
     if (map_.contains(key)) return;
+    if (frames.total_bytes > max_bytes_) return;
 
-    size_t entry_bytes = pcm.size() * sizeof(int16_t);
-    if (entry_bytes > max_bytes_) return;
-
-    evict_if_needed(entry_bytes);
+    evict_if_needed(frames.total_bytes);
 
     lru_.push_front(key);
-    map_[key] = {pcm, lru_.begin()};
-    current_bytes_ += entry_bytes;
+    map_[key] = {frames, lru_.begin()};
+    current_bytes_ += frames.total_bytes;
 }
 
 void AudioCache::evict_if_needed(size_t needed) {
@@ -54,7 +52,7 @@ void AudioCache::evict_if_needed(size_t needed) {
 
         auto it = map_.find(old_key);
         if (it != map_.end()) {
-            current_bytes_ -= it->second.pcm.size() * sizeof(int16_t);
+            current_bytes_ -= it->second.frames.total_bytes;
             map_.erase(it);
         }
     }

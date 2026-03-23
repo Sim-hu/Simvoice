@@ -5,6 +5,7 @@
 #include <csignal>
 #include <thread>
 
+#include "audio/pipeline.hpp"
 #include "bot/commands/dict.hpp"
 #include "bot/commands/join.hpp"
 #include "bot/commands/settings.hpp"
@@ -161,12 +162,12 @@ int main() {
                             .text = name + "さんが退出しました",
                             .style_id = gs.speaker_id,
                             .guild_id = guild_id,
-                            .on_complete = [vc](const std::vector<int16_t>& pcm) {
-                                if (vc->voiceclient)
-                                    vc->voiceclient->send_audio_raw(
-                                        const_cast<uint16_t*>(
-                                            reinterpret_cast<const uint16_t*>(pcm.data())),
-                                        pcm.size() * sizeof(int16_t));
+                            .on_complete = [vc](const tts_bot::OpusFrames& opus) {
+                                if (vc->voiceclient) {
+                                    for (auto& frame : opus.frames)
+                                        vc->voiceclient->send_audio_opus(
+                                            const_cast<uint8_t*>(frame.data()), frame.size());
+                                }
                             },
                         });
                     }
@@ -188,6 +189,7 @@ int main() {
                         if (!has_humans) {
                             spdlog::info("Auto-leave: no humans in VC, guild {}",
                                          gid);
+                            if (pool) pool->clear_guild(guild_id);
                             if (vc->voiceclient) vc->voiceclient->stop_audio();
                             event.from()->disconnect_voice(guild_id);
                             guild_states.remove(guild_id);
@@ -242,6 +244,7 @@ int main() {
             } else if (name == "join") {
                 tts_bot::handle_join(event, bot, guild_states);
             } else if (name == "leave") {
+                if (pool) pool->clear_guild(event.command.guild_id);
                 tts_bot::handle_leave(event, guild_states);
             } else if (name == "voice") {
                 // autocomplete で選ばれた場合、話者名を取得
@@ -268,11 +271,11 @@ int main() {
             } else if (name == "skip") {
                 tts_bot::handle_skip(event);
             } else if (name == "clear") {
+                if (pool) pool->clear_guild(event.command.guild_id);
                 auto* vc = event.from()->get_voice(event.command.guild_id);
                 if (vc && vc->voiceclient) {
                     vc->voiceclient->stop_audio();
                 }
-                // ギルドキューもクリア (TODO: pool にclear APIを追加)
                 event.reply("キューをクリアしました");
             } else if (name == "stats" && pool) {
                 tts_bot::handle_stats(event, *pool);
