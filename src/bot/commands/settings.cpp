@@ -7,7 +7,7 @@
 namespace tts_bot {
 
 dpp::slashcommand create_settings_command(dpp::snowflake app_id) {
-    auto cmd = dpp::slashcommand("settings", "読み上げ設定", app_id);
+    auto cmd = dpp::slashcommand("set", "読み上げ設定", app_id);
 
     // ギルド設定: トグル系
     auto name_toggle = dpp::command_option(dpp::co_sub_command, "name", "名前読み上げ ON/OFF");

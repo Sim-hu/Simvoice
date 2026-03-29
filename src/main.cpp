@@ -132,7 +132,12 @@ int main() {
                     cmds.push_back(tts_bot::create_stats_command(bot.me.id));
 
                 bot.global_bulk_command_create(cmds);
-                spdlog::info("Registered {} commands", cmds.size());
+                spdlog::info("Registered {} global commands", cmds.size());
+
+                // 古いギルドコマンドをクリア（グローバルに統一）
+                for (auto& [id, guild] : dpp::get_guild_cache()->get_container()) {
+                    bot.guild_bulk_command_create({}, id);
+                }
             }
         });
 
@@ -267,7 +272,7 @@ int main() {
                 tts_bot::handle_leave(event, guild_states);
             } else if (name == "dict") {
                 tts_bot::handle_dict(event, db);
-            } else if (name == "settings") {
+            } else if (name == "set") {
                 tts_bot::handle_settings(event, db, engine.get());
             } else if (name == "skip") {
                 tts_bot::handle_skip(event);
@@ -285,7 +290,7 @@ int main() {
 
         bot.on_autocomplete([&bot, &db, &engine](const dpp::autocomplete_t& event) {
             // /settings voice のオートコンプリート
-            if (event.name == "settings" && engine) {
+            if (event.name == "set" && engine) {
                 auto opts = event.command.get_command_interaction().options;
                 if (!opts.empty() && opts[0].name == "voice") {
                     std::string input;
