@@ -132,7 +132,12 @@ int main() {
                     cmds.push_back(tts_bot::create_stats_command(bot.me.id));
 
                 bot.global_bulk_command_create(cmds);
-                spdlog::info("Registered {} commands", cmds.size());
+                spdlog::info("Registered {} global commands", cmds.size());
+
+                // 古いギルドコマンドをクリア（グローバルに統一）
+                for (auto& [id, guild] : dpp::get_guild_cache()->get_container()) {
+                    bot.guild_bulk_command_create({}, id);
+                }
             }
         });
 
@@ -267,8 +272,9 @@ int main() {
                 tts_bot::handle_leave(event, guild_states);
             } else if (name == "dict") {
                 tts_bot::handle_dict(event, db);
-            } else if (name == "settings") {
-                tts_bot::handle_settings(event, db, engine.get());
+            } else if (name == "set") {
+                tts_bot::handle_settings(event, db, engine.get(),
+                                         config.default_style_id);
             } else if (name == "skip") {
                 tts_bot::handle_skip(event);
             } else if (name == "clear") {
@@ -284,66 +290,11 @@ int main() {
         });
 
         bot.on_autocomplete([&bot, &db, &engine](const dpp::autocomplete_t& event) {
-            // /settings voice のオートコンプリート
-            if (event.name == "settings" && engine) {
-                auto opts = event.command.get_command_interaction().options;
-                if (!opts.empty() && opts[0].name == "voice") {
-                    std::string input;
-                    for (auto& o : opts[0].options) {
-                        if (o.name == "id" && o.focused) {
-                            if (std::holds_alternative<std::string>(o.value))
-                                input = std::get<std::string>(o.value);
-                            break;
-                        }
-                    }
-
-                    auto speakers = engine->get_speakers();
-                    dpp::interaction_response resp(dpp::ir_autocomplete_reply);
-                    int count = 0;
-                    for (auto& s : speakers) {
-                        if (count >= 25) break;
-                        auto label = s.name + " (" + s.style_name + ")";
-                        if (!input.empty() && label.find(input) == std::string::npos)
-                            continue;
-                        resp.add_autocomplete_choice(
-                            dpp::command_option_choice(label,
-                                static_cast<int64_t>(s.style_id)));
-                        ++count;
-                    }
-                    bot.interaction_response_create(event.command.id,
-                                                    event.command.token, resp);
-                    return;
-                }
+            if (event.name == "set") {
+                tts_bot::handle_settings_autocomplete(event, bot, db, engine.get());
+            } else if (event.name == "dict") {
+                tts_bot::handle_dict_autocomplete(event, bot, db);
             }
-
-            if (event.name != "dict") return;
-
-            auto subcmd_opts = event.command.get_command_interaction().options;
-            if (subcmd_opts.empty() || subcmd_opts[0].name != "remove") return;
-
-            auto gid = static_cast<uint64_t>(event.command.guild_id);
-            std::string input;
-            for (auto& o : subcmd_opts[0].options) {
-                if (o.name == "word" && o.focused) {
-                    input = std::get<std::string>(o.value);
-                    break;
-                }
-            }
-
-            auto entries = db.dict_list(gid);
-            dpp::interaction_response response(dpp::ir_autocomplete_reply);
-            int count = 0;
-            for (auto& e : entries) {
-                if (count >= 25) break;
-                if (!input.empty() && e.word.find(input) == std::string::npos)
-                    continue;
-                response.add_autocomplete_choice(
-                    dpp::command_option_choice(e.word + " → " + e.reading, e.word));
-                ++count;
-            }
-
-            bot.interaction_response_create(event.command.id,
-                                            event.command.token, response);
         });
 
         if (pool) {
