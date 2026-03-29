@@ -11,7 +11,6 @@
 #include "bot/commands/join.hpp"
 #include "bot/commands/settings.hpp"
 #include "bot/commands/stats.hpp"
-#include "bot/commands/voice.hpp"
 #include "bot/handler.hpp"
 #include "config/config.hpp"
 #include "db/database.hpp"
@@ -125,8 +124,6 @@ int main() {
 
                 for (auto& c : tts_bot::create_join_commands(bot.me.id))
                     cmds.push_back(std::move(c));
-                for (auto& c : tts_bot::create_voice_commands(bot.me.id))
-                    cmds.push_back(std::move(c));
                 cmds.push_back(tts_bot::create_dict_command(bot.me.id));
                 cmds.push_back(tts_bot::create_settings_command(bot.me.id));
                 cmds.push_back(tts_bot::create_skip_command(bot.me.id));
@@ -190,16 +187,23 @@ int main() {
             }
 
             // Auto-leave: Bot のVC に人間が 0 人になったら退出
-            if (gs.auto_leave && state) {
+            if (gs.auto_leave) {
                 auto* vc = event.from()->get_voice(guild_id);
                 if (vc && vc->channel_id) {
                     auto* ch = dpp::find_channel(vc->channel_id);
                     if (ch) {
                         auto voice_members = ch->get_voice_members();
-                        // Bot 以外のメンバーがいるか
                         bool has_humans = false;
                         for (auto& [uid, vs] : voice_members) {
-                            if (uid != bot.me.id) { has_humans = true; break; }
+                            // Bot は全てスキップ
+                            auto* u = dpp::find_user(uid);
+                            if (u && u->is_bot()) continue;
+                            // イベント発火元ユーザーが Bot の VC から離脱/移動中
+                            // → キャッシュ更新前の可能性があるのでスキップ
+                            if (uid == event.state.user_id &&
+                                event.state.channel_id != vc->channel_id) continue;
+                            has_humans = true;
+                            break;
                         }
                         if (!has_humans) {
                             spdlog::info("Auto-leave: no humans in VC, guild {}",
@@ -261,28 +265,10 @@ int main() {
             } else if (name == "leave") {
                 if (pool) pool->clear_guild(event.command.guild_id);
                 tts_bot::handle_leave(event, guild_states);
-            } else if (name == "voice") {
-                // autocomplete で選ばれた場合、話者名を取得
-                std::string label;
-                if (engine) {
-                    auto id = static_cast<uint32_t>(
-                        std::get<int64_t>(event.get_parameter("id")));
-                    for (auto& s : engine->get_speakers()) {
-                        if (s.style_id == id) {
-                            label = s.name + " (" + s.style_name + ")";
-                            break;
-                        }
-                    }
-                }
-                tts_bot::handle_voice(event, db, label);
-            } else if (name == "speed") {
-                tts_bot::handle_speed(event, db);
-            } else if (name == "pitch") {
-                tts_bot::handle_pitch(event, db);
             } else if (name == "dict") {
                 tts_bot::handle_dict(event, db);
             } else if (name == "settings") {
-                tts_bot::handle_settings(event, db);
+                tts_bot::handle_settings(event, db, engine.get());
             } else if (name == "skip") {
                 tts_bot::handle_skip(event);
             } else if (name == "clear") {
@@ -298,32 +284,36 @@ int main() {
         });
 
         bot.on_autocomplete([&bot, &db, &engine](const dpp::autocomplete_t& event) {
-            if (event.name == "voice" && engine) {
-                std::string input;
-                for (auto& o : event.command.get_command_interaction().options) {
-                    if (o.name == "id" && o.focused) {
-                        if (std::holds_alternative<std::string>(o.value))
-                            input = std::get<std::string>(o.value);
-                        break;
+            // /settings voice のオートコンプリート
+            if (event.name == "settings" && engine) {
+                auto opts = event.command.get_command_interaction().options;
+                if (!opts.empty() && opts[0].name == "voice") {
+                    std::string input;
+                    for (auto& o : opts[0].options) {
+                        if (o.name == "id" && o.focused) {
+                            if (std::holds_alternative<std::string>(o.value))
+                                input = std::get<std::string>(o.value);
+                            break;
+                        }
                     }
-                }
 
-                auto speakers = engine->get_speakers();
-                dpp::interaction_response resp(dpp::ir_autocomplete_reply);
-                int count = 0;
-                for (auto& s : speakers) {
-                    if (count >= 25) break;
-                    auto label = s.name + " (" + s.style_name + ")";
-                    if (!input.empty() && label.find(input) == std::string::npos)
-                        continue;
-                    resp.add_autocomplete_choice(
-                        dpp::command_option_choice(label,
-                            static_cast<int64_t>(s.style_id)));
-                    ++count;
+                    auto speakers = engine->get_speakers();
+                    dpp::interaction_response resp(dpp::ir_autocomplete_reply);
+                    int count = 0;
+                    for (auto& s : speakers) {
+                        if (count >= 25) break;
+                        auto label = s.name + " (" + s.style_name + ")";
+                        if (!input.empty() && label.find(input) == std::string::npos)
+                            continue;
+                        resp.add_autocomplete_choice(
+                            dpp::command_option_choice(label,
+                                static_cast<int64_t>(s.style_id)));
+                        ++count;
+                    }
+                    bot.interaction_response_create(event.command.id,
+                                                    event.command.token, resp);
+                    return;
                 }
-                bot.interaction_response_create(event.command.id,
-                                                event.command.token, resp);
-                return;
             }
 
             if (event.name != "dict") return;
