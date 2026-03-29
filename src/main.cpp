@@ -273,7 +273,8 @@ int main() {
             } else if (name == "dict") {
                 tts_bot::handle_dict(event, db);
             } else if (name == "set") {
-                tts_bot::handle_settings(event, db, engine.get());
+                tts_bot::handle_settings(event, db, engine.get(),
+                                         config.default_style_id);
             } else if (name == "skip") {
                 tts_bot::handle_skip(event);
             } else if (name == "clear") {

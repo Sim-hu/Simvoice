@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <dpp/dpp.h>
 #include <string>
 #include <vector>
@@ -11,7 +12,8 @@ class VoicevoxEngine;
 
 dpp::slashcommand create_settings_command(dpp::snowflake app_id);
 void handle_settings(const dpp::slashcommand_t& event, Database& db,
-                     VoicevoxEngine* engine = nullptr);
+                     VoicevoxEngine* engine = nullptr,
+                     uint32_t fallback_style_id = 0);
 void handle_settings_autocomplete(const dpp::autocomplete_t& event,
                                   dpp::cluster& bot, Database& db,
                                   VoicevoxEngine* engine);
